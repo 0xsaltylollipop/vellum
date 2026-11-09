@@ -601,11 +601,13 @@ export default {
       call('setLive', cardId || null).catch(() => {})
     }
 
-    // Talk to the user's own Hermes session, as if they had typed it (Annotate's philosophy, sent directly).
-    function toSession(text) {
-      const sent = host.composer.submit(null, text)
-      if (!sent) host.notify({ kind: 'warning', message: 'Open a Hermes chat next to the paper, then try again.' })
-      return sent
+    // Nothing here sends a chat message: a click in the page only puts a draft into the user's Hermes chat box, and
+    // the user sends it with Enter. A web page (or a script in it) can therefore never start a turn by itself.
+    async function toDraft(text) {
+      let ok = false
+      try { ok = await host.composer.insertText(null, text, { mode: 'block' }) } catch (err) { ok = false }
+      if (ok) host.composer.focus(null)
+      return ok
     }
 
     // Everything from the page is checked before it reaches the chat: a card id, an arXiv paper, bounded text.
@@ -630,8 +632,9 @@ export default {
       }
       const { where, quote } = passage(sel, 3000)
       setLive(cardId)
-      const sent = toSession('✨ Visualize this passage from ' + where + ' on canvas `' + cardId + '`:\n\n' + quote)
-      call('setStatus', cardId, sent ? 'Hermes is looking at it…' : 'Open a Hermes chat first')
+      const ok = await toDraft('✨ Visualize this passage from ' + where + ' on canvas `' + cardId + '`:\n\n' + quote)
+      call('setStatus', cardId, ok ? 'Ready in your Hermes chat: press Enter to send' : 'Open a Hermes chat first')
+      if (!ok) host.notify({ kind: 'warning', message: 'Open a Hermes chat next to the paper, then try again.' })
     }
 
     // 💬 Ask, Annotate-style: the passage goes into the Hermes chat as a draft; the user adds their question (typed or
@@ -643,10 +646,8 @@ export default {
       ctx.rest('/selection', { method: 'POST', body: { id: cardId, ask: true, sessions, ...sel }, timeoutMs: 10000 }).catch(() => {})
       try { await ensureRuntime(); await call('openFigure', cardId) } catch (err) { /* the figure opens on the first stroke anyway */ }
       const { where, quote } = passage(sel, 1500)
-      let ok = false
-      try { ok = await host.composer.insertText(null, '💬 Ask about this passage from ' + where + ' on canvas `' + cardId + '`:\n' + quote + '\n\n', { mode: 'block' }) } catch (err) { ok = false }
-      if (ok) host.composer.focus(null)
-      else host.notify({ kind: 'info', message: 'Open a Hermes chat next to the paper, or just ask out loud in a voice conversation.' })
+      const ok = await toDraft('💬 Ask about this passage from ' + where + ' on canvas `' + cardId + '`:\n' + quote + '\n\n')
+      if (!ok) host.notify({ kind: 'info', message: 'Open a Hermes chat next to the paper, or just ask out loud in a voice conversation.' })
     }
 
     // Hermes's canvas tools arrive as plugin events; run them in the paper and report back to the waiting tool.
@@ -672,6 +673,11 @@ export default {
     host.onEvent('plugin.vellum.canvas.draw', onCanvas('runStep', 28000))
     host.onEvent('plugin.vellum.canvas.look', onCanvas('lookAt', 18000))
     host.onEvent('plugin.vellum.canvas.clear', onCanvas('clearCanvas', 9000))
+    // The user sent the draft and Hermes started on it (paper_anim/turns.py): say so on the card.
+    host.onEvent('plugin.vellum.turn', ({ payload }) => {
+      const p = payload || {}
+      if (p.canvas && $armed.get() && CARD.test(String(p.canvas))) call('setStatus', p.canvas, 'Hermes is looking at it…').catch(() => {})
+    })
     // Hermes's voice for our turns: each sentence is voiced as it streams (paper_anim/turns.py) and played in the card.
     host.onEvent('plugin.vellum.voice', async ({ payload }) => {
       const p = payload || {}

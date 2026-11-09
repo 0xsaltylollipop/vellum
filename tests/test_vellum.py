@@ -158,3 +158,14 @@ def test_paper_read_chunks_at_paragraphs():
     rest = json.loads(canvas.paper_read({"offset": first["next_offset"]}))
     assert rest["ok"] and rest["text"]
     assert json.loads(canvas.paper_read({"offset": "x"}))["ok"] is False
+
+
+# --- the user sends every message ---------------------------------------------------------------------------------
+
+def test_the_desktop_half_never_submits_a_chat_turn():
+    src = (ROOT / "desktop" / "plugin.js").read_text()
+    assert "composer.submit" not in src and "composer.insertText" in src
+
+
+def test_a_turn_starts_fine_when_the_card_cannot_be_told():
+    turns._announce("pa-abc")  # no Hermes here: must not raise

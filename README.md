@@ -13,8 +13,10 @@ It is not a video generator and not a separate app: it gives Hermes a new abilit
 2. Open an arXiv paper's HTML version in Hermes's browser (`arxiv.org/html/…`, or `ar5iv.labs.arxiv.org/html/…` for papers arXiv itself hasn't converted), with a Hermes chat next to it.
 3. Click **✨ Vellum** in the status bar (Desktop asks once to let it run on arxiv.org, and once more for ar5iv). Desktop asks for each site, so clicking it on any other page asks about that site: say no there. Vellum only works on arXiv HTML papers and switches itself off when you navigate away.
 4. Highlight a passage, then:
-   - **✨ Visualize**: Hermes explains it and draws.
-   - **💬 Ask**: the passage lands in your Hermes chat as a draft; add your question (type or dictate) and send. In a Hermes voice conversation you can also just say it.
+   - **✨ Visualize**: the request lands in your Hermes chat box as a draft; press Enter and Hermes explains it and draws.
+   - **💬 Ask**: the passage lands in your Hermes chat box as a draft; add your question (type or dictate) and send. In a Hermes voice conversation you can also just say it.
+
+   Vellum never sends a chat message for you: every turn starts with you pressing Enter (or speaking).
 5. Keep asking in the chat or out loud; Hermes answers and changes the same figure.
 6. Click **LIVE** on the figure to leave: Hermes chats normally again, without voice or drawing. **Resume** brings it back.
 
@@ -35,12 +37,12 @@ Everything runs in your own Hermes session, with your model and your settings. T
 ## Security model
 - **The drawing code** is written by your own model and runs only inside a sandboxed iframe in the card (`sandbox="allow-scripts"`, opaque origin, CSP `default-src 'none'`). It has no access to the paper page, Hermes, your chat, your files or cookies; it can't fetch or load anything, open windows or submit forms; it can only draw and report back to the waiting tool (done, an error, layout warnings, or a picture for `canvas_look`). Best effort beyond that: CSP doesn't govern a frame navigating itself or WebRTC, so WebRTC is switched off inside the figure, code is checked before it runs (`location`, `fetch` and similar are refused), and a figure that navigates away anyway is removed. Every loop in figure code is time-limited, so a runaway step can't freeze the figure. A model that has been talked into leaking data could still try; it would have Hermes's own web tools for that too, so the sandbox adds no new reach.
 - **Paper text is untrusted.** The highlighted passage and the paper text around it are web content; the plugin labels both for the model as reference material whose instructions must never be followed. Hidden prompt-injection text in a paper is still a risk any agent reading the web has.
-- **Messages come from your clicks.** Visualize, Ask, LIVE and close act on real clicks only, the in-page script is a frozen, read-only object installed under a random name, and every event from the page is checked (an arXiv paper, a card id, bounded text) before anything is sent to your chat. This is best effort against scripts that arxiv.org itself serves: the page you allow is trusted to that extent.
+- **You send every message.** A click on Visualize or Ask only puts a draft into your Hermes chat box; the plugin never submits a chat turn, so nothing in a web page can start one. Visualize, Ask, LIVE and close act on real clicks only, the in-page script is a frozen, read-only object installed under a random name, and every event from the page is checked (an arXiv paper, a card id, bounded text) before anything is put into your chat box. This is best effort against scripts that arxiv.org itself serves: the page you allow is trusted to that extent.
 - **Other chats are left alone.** Cron, messaging platforms and subagents never get paper turns, a figure belongs to the chat it was made in, and the figure tools are refused outside paper turns and fail at once when no Desktop paper is on.
 
 ## What it touches (disclosure)
 - **The paper page:** reads the page you're on (arXiv HTML pages only: arxiv.org/html and ar5iv) with Desktop's per-site consent, adds the buttons and the figure card under the paragraph. Nothing else on the page is changed.
-- **Your Hermes session:** sends ✨ Visualize / 💬 Ask messages to the chat you have open, as if you typed them; adds paper context to those turns (visible to the model only).
+- **Your Hermes session:** puts ✨ Visualize / 💬 Ask drafts into the chat box of the chat you have open, for you to send; adds paper context to those turns (visible to the model only).
 - **Your model:** whatever Hermes is configured to use. The passage and nearby paper text go to it as part of the turn.
 - **Voice:** Hermes's own `text_to_speech` with your configured provider, one call per spoken sentence (Edge TTS by default, a free online Microsoft service; a paid provider bills each sentence).
 - **Stored data:** in the plugin's data folder of your active Hermes profile (`<HERMES_HOME>/plugin-data/vellum/`, usually `~/.hermes/…`): the text of the 20 most recently opened papers, the current Ask, whether the plugin is on and which figure is LIVE (re-confirmed every ~20 s while Desktop runs), and short-lived files (voiced sentences, removed after about a day; tool answers, after about an hour; cleaned up during use). No telemetry.

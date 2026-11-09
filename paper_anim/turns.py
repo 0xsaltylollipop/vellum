@@ -149,6 +149,15 @@ def _start(session_id: str, canvas: str) -> None:
         _left.discard(session_id)
 
 
+def _announce(canvas: str) -> None:
+    """Tell the card its turn has started (the user sent the draft), so it can say Hermes is on it."""
+    try:
+        from hermes_cli.plugin_events import broadcast_plugin_event
+        broadcast_plugin_event(pc.PLUGIN_ID, "turn", {"canvas": canvas})
+    except Exception as e:  # the card just keeps its old line
+        log.debug("vellum: could not announce the turn on %s: %s", canvas, e)
+
+
 def _with_paper(parts: list, url: str, passage: str) -> dict:
     budget = INJECT_MAX - sum(len(p) for p in parts) - 400
     paper = _paper_context(url, passage, budget) if url else ""
@@ -174,6 +183,7 @@ def pre_llm_call(session_id="", user_message="", platform="", parent_session_id=
             return None
         pc.prune()
         _start(session_id, canvas.group(1))
+        _announce(canvas.group(1))
         sel = _state("selection")
         if sel.get("id") == canvas.group(1) and not sel.get("used"):
             _mark_used(sel)  # this Ask's question came typed: nothing left to bind a spoken one to
@@ -189,6 +199,7 @@ def pre_llm_call(session_id="", user_message="", platform="", parent_session_id=
     if sel:
         canvas = sel["id"]
         _start(session_id, canvas)
+        _announce(canvas)
         quote = "\n".join("> " + l for l in str(sel.get("text", ""))[:3000].split("\n"))
         parts = [head, _skill_text(),
                  f"The user highlighted this passage in the paper ({sel.get('url', '')}"
