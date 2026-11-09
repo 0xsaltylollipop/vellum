@@ -51,7 +51,7 @@ INJECT_MAX = 9500  # Hermes spills a hook's injected context above hooks.output_
 
 def _skill_text() -> str:
     """The skill's instructions (skills/paper-canvas/SKILL.md without its frontmatter): added to every paper turn, so
-    Hermes has them without a lookup. The same file is registered as the skill paper-animations:paper-canvas."""
+    Hermes has them without a lookup. The same file is registered as the skill vellum:paper-canvas."""
     path = PLUGIN_ROOT / "skills/paper-canvas/SKILL.md"
     return re.sub(r"^---.*?---\s*", "", path.read_text(), flags=re.S).strip()
 
@@ -155,7 +155,7 @@ def pre_llm_call(session_id="", user_message="", platform="", parent_session_id=
     msg = user_message if isinstance(user_message, str) else " ".join(
         p.get("text", "") for p in user_message if isinstance(p, dict))
     msg = msg or ""
-    head = "[Paper Animations, for you only: the user sees just their message.]"
+    head = "[Vellum, for you only: the user sees just their message.]"
 
     # ✨ Visualize / 💬 Ask from the paper: the skill and the paper around the passage, every time (a long chat's
     # compaction may have summarised an earlier copy away).
@@ -213,7 +213,7 @@ def pre_tool_call(tool_name="", args=None, task_id="", **kwargs):
     v = _speaking.get(kwargs.get("session_id") or task_id)
     if v is None:  # figures only change in a paper turn: never in other chats, cron, messaging, or after leaving
         return {"action": "block", "message": (
-            "Not available here: Paper Animations only draws in a paper turn (the user clicked Visualize or Ask, or "
+            "Not available here: Vellum only draws in a paper turn (the user clicked Visualize or Ask, or "
             "a figure in this chat is LIVE). Answer in text; to draw again they can click Resume on the figure.")}
     if tool_name != "canvas_draw":
         return None

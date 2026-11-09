@@ -1,4 +1,4 @@
-"""Paper Animations, agent half: Hermes's pen in the paper.
+"""Vellum, agent half: Hermes's pen in the paper.
 
 Registers small canvas tools (draw a step, look at it, clear it) plus paper_read, the skill that teaches Hermes
 how to sketch the figure a passage should have had, and hooks that give our turns the paper quietly and a live
@@ -10,7 +10,7 @@ from pathlib import Path
 from .paper_anim import canvas, turns
 from .paper_anim.canvas import HANDLERS, SCHEMAS
 
-TOOLSET = "paper-animations"
+TOOLSET = "vellum"
 
 
 def register(ctx):

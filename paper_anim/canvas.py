@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .config import data_dir
 
-PLUGIN_ID = "paper-animations"
+PLUGIN_ID = "vellum"
 # Papers the plugin works with: arXiv's own HTML, and ar5iv (arXiv's HTML for older papers); both are LaTeXML pages.
 PAPER_URL = re.compile(r"https://(arxiv\.org|ar5iv\.labs\.arxiv\.org|ar5iv\.org)/html/[^)\s#]+")
 
@@ -62,7 +62,7 @@ STATE_FRESH_S = 75  # Desktop re-confirms "on" about every 20 s; older than this
 
 
 def is_on() -> bool:
-    """Paper Animations is switched on in a running Hermes Desktop's paper (the status-bar chip)."""
+    """Vellum is switched on in a running Hermes Desktop's paper (the status-bar chip)."""
     try:
         st = json.loads((relay_dir() / "state.json").read_text())
         return bool(st.get("armed")) and time.time() - float(st.get("t", 0)) < STATE_FRESH_S
@@ -98,7 +98,7 @@ def _request(event: str, payload: dict, timeout: float) -> dict:
     """Push a request to the paper and wait for its answer."""
     prune()
     if not is_on():  # fail at once (cron, messaging, a closed Desktop) instead of waiting for a paper that isn't there
-        return {"ok": False, "error": "Paper Animations is off: there is no paper canvas to draw on. Answer in text."}
+        return {"ok": False, "error": "Vellum is off: there is no paper canvas to draw on. Answer in text."}
     from hermes_cli.plugin_events import broadcast_plugin_event
     req = uuid.uuid4().hex[:16]
     path = relay_dir() / "results" / f"{req}.json"
@@ -113,7 +113,7 @@ def _request(event: str, payload: dict, timeout: float) -> dict:
             except (json.JSONDecodeError, OSError):
                 pass
         time.sleep(0.05)
-    return {"ok": False, "error": "The paper didn't answer. Is it open in Hermes's browser with Paper Animations on?"}
+    return {"ok": False, "error": "The paper didn't answer. Is it open in Hermes's browser with Vellum on?"}
 
 
 def _canvas(args: dict) -> str:
@@ -133,8 +133,14 @@ def canvas_draw(args: dict, **kwargs) -> str:
     # The reader is listening while you work: the next words should be spoken before the next step is written.
     if not out.get("ok"):
         # A mistake in the figure's code: fix it. Anything else (no paper open, card closed): don't retry.
-        out["next"] = ("Fix the code quietly with a small step; keep its `say` very short, they already heard this one."
-                       if out.get("kind") == "code" else "The figure isn't available right now: answer in text.")
+        err = str(out.get("error") or "")
+        if out.get("kind") != "code":
+            out["next"] = "The figure isn't available right now: answer in text."
+        elif "still running" in err:
+            out["next"] = "It's still drawing, so don't redraw it; just carry on (and don't await long animations)."
+        else:
+            out["next"] = ("Nothing from that step was kept: redo it in one go with the fix, quietly, with a very short "
+                           "`say` (they already heard this one).")
     elif out.get("overlaps") or out.get("outside"):
         out["next"] = ("Drawn, but some labels overlap or are cut off (listed above): fix them quietly in your next "
                        "step, which carries its own `say` as always.")
@@ -182,7 +188,7 @@ def paper_read(args: dict, **kwargs) -> str:
         text = (papers / f"{latest['key']}.txt").read_text()
         latest["title"] = latest["title"] or text.split("\n", 1)[0].lstrip("# ")
     except Exception:
-        return json.dumps({"ok": False, "error": "No paper open. Open an arXiv paper's HTML version and switch Paper Animations on."})
+        return json.dumps({"ok": False, "error": "No paper open. Open an arXiv paper's HTML version and switch Vellum on."})
     # Chunks stay well under Hermes's 100k-character tool-result spillover, so the paper lands IN the conversation
     # (not in a spill file), cut at a paragraph boundary.
     try:

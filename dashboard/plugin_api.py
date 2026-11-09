@@ -1,10 +1,10 @@
-"""Paper Animations backend, mounted at /api/plugins/paper-animations/. The desktop half (the paper) talks to it;
+"""Vellum backend, mounted at /api/plugins/vellum/. The desktop half (the paper) talks to it;
 the agent half (Hermes's canvas tools and hooks) reads what it stores.
 
 GET  /runtime              the sandboxed figure runtime page (HTML) the card loads into its iframe
 POST /canvas/result        the paper's answer to a canvas tool request (draw / look / clear), relayed to the tool
 POST /paper                the open paper's full text, for paper_read and the hidden context
-POST /state                whether Paper Animations is on, and which card is LIVE (read by the hooks)
+POST /state                whether Vellum is on, and which card is LIVE (read by the hooks)
 POST /selection            the passage behind a 💬 Ask                         (read by the hooks)
 GET  /voice/{file}         one voiced sentence of Hermes's (data URL) for the card to play
 """
@@ -29,11 +29,11 @@ def _package(alias: str, folder: Path):
     return sys.modules[alias]
 
 
-_package("_paper_animations_core", ROOT / "paper_anim")
-_package("_paper_animations_figure", ROOT / "figure_runtime")
-canvas = importlib.import_module("_paper_animations_core.canvas")
-turns = importlib.import_module("_paper_animations_core.turns")
-runtime_html = importlib.import_module("_paper_animations_figure.build").runtime_html
+_package("_vellum_core", ROOT / "paper_anim")
+_package("_vellum_figure", ROOT / "figure_runtime")
+canvas = importlib.import_module("_vellum_core.canvas")
+turns = importlib.import_module("_vellum_core.turns")
+runtime_html = importlib.import_module("_vellum_figure.build").runtime_html
 
 router = APIRouter()
 

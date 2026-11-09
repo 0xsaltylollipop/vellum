@@ -1,4 +1,4 @@
-// Paper Animations, desktop half: Hermes's canvas inside the paper.
+// Vellum, desktop half: Hermes's canvas inside the paper.
 // Highlight a passage on an arXiv paper (arxiv.org/html or ar5iv) -> "Visualize" -> a card with an empty canvas unfolds under the
 // paragraph and the passage goes to the user's own Hermes session as a turn. Hermes talks (in chat / by voice)
 // and draws on the canvas step by step with its canvas tools (paper_anim/canvas.py), whose requests arrive here
@@ -10,7 +10,7 @@ import { jsx } from 'react/jsx-runtime'
 
 // Runs INSIDE the arXiv page (serialized with toString), so it must be self-contained.
 // Returns the api object the plugin installs as a read-only window property under a random name.
-function paperAnimInPage() {
+function vellumInPage() {
   var queue = []
   var waiter = null
   var btn = null
@@ -542,9 +542,9 @@ function paperAnimInPage() {
 
 // The in-page script is installed under a fresh random name each time, as a read-only window property: scripts on
 // the page can't replace it to feed the plugin fake events. Built by concatenation, so nothing is interpolated.
-const newKey = () => '__paperAnim_' + Math.random().toString(36).slice(2, 12)
+const newKey = () => '__vellum_' + Math.random().toString(36).slice(2, 12)
 const installCode = key =>
-  '(function(){var api=(' + paperAnimInPage.toString() + ')();' +
+  '(function(){var api=(' + vellumInPage.toString() + ')();' +
   'Object.freeze(api);Object.defineProperty(window,' + JSON.stringify(key) + ',{value:api,writable:false,configurable:false,enumerable:false});' +
   'return api.install();})()'
 const onPage = (key, expr, otherwise) => '(window[' + JSON.stringify(key) + '] ? ' + expr + ' : ' + otherwise + ')'
@@ -561,13 +561,13 @@ function Chip({ toggle }) {
     onClick: toggle,
     title: armed ? 'Hermes can draw in this paper. Click to stop.' : 'Let Hermes draw in the open arXiv paper',
     className: 'px-1.5 text-[0.6875rem] ' + (armed ? 'text-(--ui-text-primary)' : 'text-(--ui-text-tertiary)'),
-    children: armed ? '✨ Paper Animations: on' : '✨ Paper Animations: off'
+    children: armed ? '✨ Vellum: on' : '✨ Vellum: off'
   })
 }
 
 export default {
-  id: 'paper-animations',
-  name: 'Paper Animations',
+  id: 'vellum',
+  name: 'Vellum',
   capabilities: ['preview.executeJavaScript'],
   register(ctx) {
     // A fresh load (plugin toggled, app reloaded) starts switched off: the chip must never claim "on" for a
@@ -662,16 +662,16 @@ export default {
           fn === 'runStep' ? call('runStep', p.canvas, p.code, p.after || null) : call(fn, p.canvas),
           new Promise(resolve => ctx.setTimeout(() => resolve({ ok: false, error: 'The paper did not answer.' }), timeoutMs))
         ])
-        answer(p.req, result || { ok: false, error: 'Paper Animations is not running in the open page.' })
+        answer(p.req, result || { ok: false, error: 'Vellum is not running in the open page.' })
       } catch (err) {
         answer(p.req, { ok: false, error: errText(err) })
       }
     }
-    host.onEvent('plugin.paper-animations.canvas.draw', onCanvas('runStep', 28000))
-    host.onEvent('plugin.paper-animations.canvas.look', onCanvas('lookAt', 18000))
-    host.onEvent('plugin.paper-animations.canvas.clear', onCanvas('clearCanvas', 9000))
+    host.onEvent('plugin.vellum.canvas.draw', onCanvas('runStep', 28000))
+    host.onEvent('plugin.vellum.canvas.look', onCanvas('lookAt', 18000))
+    host.onEvent('plugin.vellum.canvas.clear', onCanvas('clearCanvas', 9000))
     // Hermes's voice for our turns: each sentence is voiced as it streams (paper_anim/turns.py) and played in the card.
-    host.onEvent('plugin.paper-animations.voice', async ({ payload }) => {
+    host.onEvent('plugin.vellum.voice', async ({ payload }) => {
       const p = payload || {}
       if (!p.canvas || !$armed.get() || !CARD.test(String(p.canvas))) return
       if (p.failed) { call('playVoice', p.canvas, { turn: p.turn, seq: p.seq, text: p.text, failed: true }).catch(() => {}); return }
@@ -692,7 +692,7 @@ export default {
           ev = await page(onPage(key, 'window[' + JSON.stringify(key) + '].wait()', 'Promise.resolve({ type: "gone" })'))
         } catch (err) {
           stop()
-          host.notifyError(err, 'Paper Animations stopped')
+          host.notifyError(err, 'Vellum stopped')
           return
         }
         if (gen !== generation) return
@@ -701,7 +701,7 @@ export default {
           // Same-site navigation (a new paper, a reload) wiped the page script and its cards: put it back.
           if (liveCard) setLive(null)
           const res = await install().catch(() => null)
-          if (!res || !res.ok) { stop(); host.notify({ kind: 'info', message: 'Paper Animations paused: ' + ((res && res.reason) || 'page changed') }); return }
+          if (!res || !res.ok) { stop(); host.notify({ kind: 'info', message: 'Vellum paused: ' + ((res && res.reason) || 'page changed') }); return }
           sharePaper().catch(() => {})
         } else if (ev && ev.type === 'visualize') {
           visualize(ev.cardId, ev.selection)
@@ -726,13 +726,13 @@ export default {
         if (!res || !res.ok) { host.notify({ kind: 'info', message: (res && res.reason) || 'Could not start here.' }); return }
         generation += 1
         $armed.set(true)
-        host.notify({ kind: 'info', message: 'Paper Animations is on. Highlight a passage, then click Visualize or Ask.' })
+        host.notify({ kind: 'info', message: 'Vellum is on. Highlight a passage, then click Visualize or Ask.' })
         liveCard = ''
         postState()
         loop(generation)
         sharePaper().catch(err => host.notifyError(err, 'Could not share the paper with Hermes'))
       } catch (err) {
-        host.notifyError(err, 'Could not start Paper Animations')
+        host.notifyError(err, 'Could not start Vellum')
       }
     }
 

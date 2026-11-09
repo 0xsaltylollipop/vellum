@@ -13,6 +13,10 @@
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const post = msg => parent.postMessage(Object.assign({ pa: true }, msg), '*');
   let busy = false;
+  // CSP blocks every request except WebRTC, so the figure has no WebRTC at all.
+  for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel', 'RTCSessionDescription', 'RTCIceCandidate']) {
+    try { Object.defineProperty(window, name, { value: undefined, writable: false, configurable: false }); } catch (e) { /* not present */ }
+  }
 
   // ---- fit the 960x540 stage to the card width ----
   function fit() {
@@ -36,13 +40,17 @@
     katex.render(String(latex), div, { throwOnError: false, displayMode: false });
     for (const el of [div, ...div.querySelectorAll('*')]) el.setAttribute('data-pa-part', '');
     fo.appendChild(div);
-    // Measure now, and again once KaTeX's fonts have loaded (they change the width), so nothing is clipped.
+    // Measure now, and again once KaTeX's fonts have loaded (they change the width), so nothing is clipped. Its
+    // position is set from the anchor only while nobody else (the figure code, nudgeInside) has moved it.
     const place = () => {
       if (div.parentNode !== fo) return;
       const w = div.offsetWidth, h = div.offsetHeight;
       fo.setAttribute('width', w + 6); fo.setAttribute('height', h + 6);
+      const ours = !fo.__paXY || (fo.getAttribute('x') === fo.__paXY[0] && fo.getAttribute('y') === fo.__paXY[1]);
+      if (!ours) return;
       fo.setAttribute('x', anchor === 'start' ? x : anchor === 'end' ? x - w : x - w / 2);
       fo.setAttribute('y', y - h / 2);
+      fo.__paXY = [fo.getAttribute('x'), fo.getAttribute('y')];
     };
     place();
     if (document.fonts && document.fonts.status !== 'loaded') document.fonts.ready.then(place);
@@ -67,10 +75,11 @@
       const home = el.closest('foreignObject[data-pa-math]');
       if (!home && el.isConnected) { el.remove(); fixed++; }
     }
-    // formulas that lost their insides: draw them again, in place
+    // formulas whose box was emptied (their insides pulled out): draw them again, in place. A formula the figure
+    // changed on purpose (new text, its own HTML) still has its .math box and is left alone.
     for (const fo of stage.querySelectorAll('foreignObject[data-pa-math]')) {
       const div = fo.firstElementChild;
-      if (fo.__paMath && (!div || !div.classList.contains('math') || !div.querySelector('.katex'))) { renderMath(fo); fixed++; }
+      if (fo.__paMath && !(div && div.classList.contains('math'))) { renderMath(fo); fixed++; }
     }
     return fixed;
   }
@@ -88,7 +97,8 @@
 
   // Figures only draw. Refuse the obvious ways out of the frame (the CSP already blocks every network request;
   // the paper page also removes a figure that navigates away). Best effort: it explains the rule to the model.
-  const BLOCKED_PROPS = new Set(['location', 'opener', 'postMessage', 'cookie', 'domain']);
+  const BLOCKED_PROPS = new Set(['location', 'opener', 'postMessage', 'cookie', 'domain', 'contentWindow', 'contentDocument',
+    'RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel']);
   const BLOCKED_NAMES = new Set(['location', 'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'importScripts', 'RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel']);
   function guard(node) {
     if (!node || typeof node.type !== 'string') return;
@@ -111,7 +121,38 @@
     child._ref = !decl && !prop;
   }
 
+  // Every loop gets a tiny check (__loop) at the top of its body: a loop that runs flat out for more than LOOP_MS is
+  // stopped with an error instead of freezing the figure. A loop that runs later (a slider, a timer) starts afresh.
+  const LOOP_MS = 3000;
+  let loopStart = 0, loopSeen = 0;
+  function __loop() {
+    const now = Date.now();
+    if (now - loopSeen > 50) loopStart = now;
+    loopSeen = now;
+    if (now - loopStart > LOOP_MS) throw new Error(`a loop ran for over ${LOOP_MS / 1000} s and was stopped`);
+  }
+  const LOOPS = new Set(['WhileStatement', 'DoWhileStatement', 'ForStatement', 'ForInStatement', 'ForOfStatement']);
+  function addLoopGuards(code) {
+    const ast = acorn.parse(code, { ecmaVersion: 'latest', allowAwaitOutsideFunction: true, allowReturnOutsideFunction: true });
+    const inserts = [];
+    (function walk(node) {
+      if (!node || typeof node.type !== 'string') return;
+      if (LOOPS.has(node.type) && node.body) {
+        if (node.body.type === 'BlockStatement') inserts.push({ at: node.body.start + 1, text: '__loop();' });
+        else { inserts.push({ at: node.body.start, text: '{__loop();' }); inserts.push({ at: node.body.end, text: '}' }); }
+      }
+      for (const k in node) {
+        const v = node[k];
+        if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v.type === 'string') walk(v);
+      }
+    })(ast);
+    let out = code;
+    for (const i of inserts.sort((a, b) => b.at - a.at)) out = out.slice(0, i.at) + i.text + out.slice(i.at);
+    return out;
+  }
+
   function rewrite(code) {
+    code = addLoopGuards(code);
     const ast = acorn.parse(code, { ecmaVersion: 'latest', allowAwaitOutsideFunction: true, allowReturnOutsideFunction: true });
     guard(ast);
     const edits = [], declared = [];
@@ -186,24 +227,30 @@
         const added = [];
         const watch = new MutationObserver(rs => rs.forEach(r => r.addedNodes.forEach(n => { if (n.nodeType === 1) added.push(n); })));
         watch.observe(stage, { childList: true, subtree: true });
-        let error = null;
+        const names = new Map(Object.entries(S));
+        let error = null, slow = false;
         try {
           const r = rewrite(piece.code);
           r.declared.forEach(n => { if (!(n in S)) S[n] = undefined; });
-          const fn = new AsyncFunction('S', 'stage', 'math', 'd3',
+          const fn = new AsyncFunction('S', 'stage', 'math', 'd3', '__loop',
             'with (S) { return (async () => {\n' + r.code + '\n})(); }');
-          await Promise.race([fn(S, stage, math, window.d3),
-            sleep(STEP_MS).then(() => { throw new Error(`this step took longer than ${STEP_MS / 1000} s and was stopped`); })]);
+          const run = fn(S, stage, math, window.d3, __loop);
+          const outcome = await Promise.race([run.then(() => 'done'), sleep(STEP_MS).then(() => 'slow')]);
+          if (outcome === 'slow') { slow = true; run.catch(() => {}); }
         } catch (e) {
           error = String(e && e.message || e).slice(0, 200);
         }
         watch.takeRecords().forEach(r => r.addedNodes.forEach(n => { if (n.nodeType === 1) added.push(n); }));
         watch.disconnect();
-        if (error) {  // a failed step leaves nothing half-drawn behind: what it added (and holds nothing older) goes
+        if (error) {  // a failed step leaves nothing behind: what it added (holding nothing older) goes, its names too
           for (const n of added) {
             if (n.isConnected && !before.has(n) && ![...n.querySelectorAll('*')].some(d => before.has(d))) n.remove();
           }
+          for (const k of Object.keys(S)) if (!names.has(k)) delete S[k];
+          for (const [k, v] of names) S[k] = v;
           post({ type: 'piece_error', n: piece.n, msg: error + ' (nothing from this step was kept)' });
+        } else if (slow) {  // still waiting on something (often an awaited animation): the board moves on, its marks stay
+          post({ type: 'piece_error', n: piece.n, msg: `this step was still running after ${STEP_MS / 1000} s, so the board moved on; what it drew stays (don't await long animations)` });
         }
         safely(repairMath);
         safely(raiseLabels);

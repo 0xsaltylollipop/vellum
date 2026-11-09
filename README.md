@@ -1,15 +1,17 @@
-# Paper Animations: Hermes inside the paper
+# Vellum: Hermes draws inside the paper
 
 **Your agent, with the whole paper in its head, drawing a live figure you can touch.**
+
+*Vellum is the parchment medieval scribes illuminated: they drew living pictures right into the text to explain it. This plugin gives Hermes that pen.*
 
 Highlight a passage in an arXiv paper in Hermes's browser. Your own Hermes session gives you the gist like a smart friend at a whiteboard: it talks you through the core idea while it sketches a live, interactive figure right under the paragraph, built from the paper's own example and numbers. Ask a follow-up (typed or out loud) and it keeps drawing on the same sketch.
 
 It is not a video generator and not a separate app: it gives Hermes a new ability, **a canvas inside what you're reading**, plus a voice that stays in sync with the drawing.
 
 ## Try it
-1. Install it with `hermes plugins install paper-animations`, then turn it on in Hermes Desktop (Capabilities → Plugins → Paper Animations → On). Needs Hermes Desktop 0.22.6 or newer.
+1. Install it with `hermes plugins install vellum`, then turn it on in Hermes Desktop (Capabilities → Plugins → Vellum → On). Needs Hermes Desktop 0.22.6 or newer.
 2. Open an arXiv paper's HTML version in Hermes's browser (`arxiv.org/html/…`, or `ar5iv.labs.arxiv.org/html/…` for papers arXiv itself hasn't converted), with a Hermes chat next to it.
-3. Click **✨ Paper Animations** in the status bar (Desktop asks once to let it run on arxiv.org).
+3. Click **✨ Vellum** in the status bar (Desktop asks once to let it run on arxiv.org).
 4. Highlight a passage, then:
    - **✨ Visualize**: Hermes explains it and draws.
    - **💬 Ask**: the passage lands in your Hermes chat as a draft; add your question (type or dictate) and send. In a Hermes voice conversation you can also just say it.
@@ -28,10 +30,10 @@ Everything runs in your own Hermes session, with your model and your settings. T
 | `canvas_clear(canvas)` | Start over (the old drawing fades away). |
 | `paper_read(url, offset)` | The paper's full text (formulas as LaTeX, tables cell by cell), in chunks. |
 | Hooks on Hermes's turns | Hermes calls them on every turn; they act only on **paper turns** and return at once otherwise. A paper turn is a ✨ Visualize / 💬 Ask message, a question spoken right after 💬 Ask, or a follow-up in the chat that owns the **LIVE** figure; only Desktop or local chats qualify (never cron, messaging platforms or subagents), and only while the plugin is on. On a paper turn they add the skill and the paper around the passage to that message (for the model only), voice Hermes's text sentence by sentence and each step's `say` with Hermes's `text_to_speech`, and show each drawing step as its sentence starts. Outside a paper turn the figure tools are refused. |
-| A skill (`paper-animations:paper-canvas`) | The guidance itself: find the passage's key idea in the context of the paper, give the gist and the why, and build one concrete example on the board. Edit `skills/paper-canvas/SKILL.md` to change the style. |
+| A skill (`vellum:paper-canvas`) | The guidance itself: find the passage's key idea in the context of the paper, give the gist and the why, and build one concrete example on the board. Edit `skills/paper-canvas/SKILL.md` to change the style. |
 
 ## Security model
-- **The drawing code** is written by your own model and runs only inside a sandboxed iframe in the card (`sandbox="allow-scripts"`, opaque origin, CSP `default-src 'none'`). It has no access to the paper page, Hermes, your chat, your files or cookies; it can't fetch or load anything, open windows or submit forms; it can only draw and report back to the waiting tool (done, an error, layout warnings, or a picture for `canvas_look`). Best effort beyond that: CSP doesn't govern a frame navigating itself or WebRTC, so code is checked before it runs (`location`, `fetch`, WebRTC and similar are refused) and a figure that navigates away anyway is removed. A model that has been talked into leaking data could still try; it would have Hermes's own web tools for that too, so the sandbox adds no new reach.
+- **The drawing code** is written by your own model and runs only inside a sandboxed iframe in the card (`sandbox="allow-scripts"`, opaque origin, CSP `default-src 'none'`). It has no access to the paper page, Hermes, your chat, your files or cookies; it can't fetch or load anything, open windows or submit forms; it can only draw and report back to the waiting tool (done, an error, layout warnings, or a picture for `canvas_look`). Best effort beyond that: CSP doesn't govern a frame navigating itself or WebRTC, so WebRTC is switched off inside the figure, code is checked before it runs (`location`, `fetch` and similar are refused), and a figure that navigates away anyway is removed. Every loop in figure code is time-limited, so a runaway step can't freeze the figure. A model that has been talked into leaking data could still try; it would have Hermes's own web tools for that too, so the sandbox adds no new reach.
 - **Paper text is untrusted.** The highlighted passage and the paper text around it are web content; the plugin labels both for the model as reference material whose instructions must never be followed. Hidden prompt-injection text in a paper is still a risk any agent reading the web has.
 - **Messages come from your clicks.** Visualize, Ask, LIVE and close act on real clicks only, the in-page script is a frozen, read-only object installed under a random name, and every event from the page is checked (an arXiv paper, a card id, bounded text) before anything is sent to your chat. This is best effort against scripts that arxiv.org itself serves: the page you allow is trusted to that extent.
 - **Other chats are left alone.** Cron, messaging platforms and subagents never get paper turns, a figure belongs to the chat it was made in, and the figure tools are refused outside paper turns and fail at once when no Desktop paper is on.
@@ -41,7 +43,7 @@ Everything runs in your own Hermes session, with your model and your settings. T
 - **Your Hermes session:** sends ✨ Visualize / 💬 Ask messages to the chat you have open, as if you typed them; adds paper context to those turns (visible to the model only).
 - **Your model:** whatever Hermes is configured to use. The passage and nearby paper text go to it as part of the turn.
 - **Voice:** Hermes's own `text_to_speech` with your configured provider, one call per spoken sentence (Edge TTS by default, a free online Microsoft service; a paid provider bills each sentence).
-- **Stored data:** in the plugin's data folder of your active Hermes profile (`<HERMES_HOME>/plugin-data/paper-animations/`, usually `~/.hermes/…`): the text of the 20 most recently opened papers, the current Ask, whether the plugin is on and which figure is LIVE (re-confirmed every ~20 s while Desktop runs), and short-lived files (voiced sentences, removed after about a day; tool answers, after about an hour; cleaned up during use). No telemetry.
+- **Stored data:** in the plugin's data folder of your active Hermes profile (`<HERMES_HOME>/plugin-data/vellum/`, usually `~/.hermes/…`): the text of the 20 most recently opened papers, the current Ask, whether the plugin is on and which figure is LIVE (re-confirmed every ~20 s while Desktop runs), and short-lived files (voiced sentences, removed after about a day; tool answers, after about an hour; cleaned up during use). No telemetry.
 - **When the paper isn't open** (Desktop closed or crashed, the chip off, cron or messaging runs): the canvas tools fail at once with a short message and the hooks do nothing.
 - No credentials, no external CLIs, no downloads, no binaries.
 

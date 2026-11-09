@@ -1,7 +1,7 @@
-name: paper-animations
-version: "0.3.0"
+name: vellum
+version: "0.4.0"
 manifest_version: 2
-description: "Hermes inside the paper. Highlight a passage on an arXiv paper in the Hermes Browser and your own Hermes session sketches the figure that paragraph should have had, live and interactive, right under it, while talking you through it. Ask more and it keeps drawing."
+description: "Vellum: Hermes draws inside the paper. Highlight a passage in an arXiv paper in Hermes's browser and your own Hermes explains it out loud while drawing a live figure right under it. Ask more and it keeps building on the same figure."
 license: MIT
 tags: [research, papers, visualization, desktop, education]
 requires_hermes: ">=0.22.6"

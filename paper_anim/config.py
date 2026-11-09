@@ -7,7 +7,7 @@ def data_dir() -> Path:
     try:
         from plugins.plugin_storage import plugin_data_dir
     except ImportError:  # outside Hermes (a plain Python check of the plugin)
-        d = Path.home() / ".hermes" / "plugin-data" / "paper-animations"
+        d = Path.home() / ".hermes" / "plugin-data" / "vellum"
         d.mkdir(parents=True, exist_ok=True)
         return d
-    return plugin_data_dir("paper-animations")
+    return plugin_data_dir("vellum")
