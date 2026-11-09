@@ -1,0 +1,9 @@
+{
+  "name": "paper-animations",
+  "label": "Paper Animations",
+  "description": "Highlight a passage in an arXiv paper: your Hermes explains it out loud while it draws a live figure under the paragraph.",
+  "tab": {
+    "hidden": true
+  },
+  "api": "plugin_api.py"
+}

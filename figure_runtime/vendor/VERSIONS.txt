@@ -1,0 +1,13 @@
+Vendored, unmodified, from the npm registry (via unpkg). Each sha256 matches the published file:
+
+d3.min.js  sha256 912111098ea99503a6f4967361d2bbdc9dbf58cf9c678c8e27e5b02d1a07f0c1
+    https://unpkg.com/d3@7.9.2/dist/d3.min.js  (ISC, see LICENSE-d3.txt)
+katex.min.js  sha256 a29d2961d3146de5949d78ac7c1a9d93ae54955bad22a6db4fbe836e88e8bf48
+    https://unpkg.com/katex@0.16.47/dist/katex.min.js  (MIT, see LICENSE-katex.txt)
+katex.min.css  sha256 0289a02cf451a44dd73add683a09644252363871ac11713a647b732cee8b1ee3
+    https://unpkg.com/katex@0.16.47/dist/katex.min.css  (MIT, see LICENSE-katex.txt)
+acorn.js  sha256 b95392d79457d0357555c5ed3e56302d074b92dff119bcf3b44179500b10e9df
+    https://unpkg.com/acorn@8.19.0/dist/acorn.js  (MIT, see LICENSE-acorn.txt)
+fonts/  KaTeX 0.16.47 fonts (https://unpkg.com/katex@0.16.47/dist/fonts/), MIT, see LICENSE-katex.txt
+
+Check: curl -sL <url> | shasum -a 256

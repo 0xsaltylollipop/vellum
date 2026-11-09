@@ -1,0 +1,11 @@
+name: paper-animations
+version: "0.3.0"
+manifest_version: 2
+description: "Hermes inside the paper. Highlight a passage on an arXiv paper in the Hermes Browser and your own Hermes session sketches the figure that paragraph should have had, live and interactive, right under it, while talking you through it. Ask more and it keeps drawing."
+license: MIT
+tags: [research, papers, visualization, desktop, education]
+requires_hermes: ">=0.22.6"
+platforms: []
+provides_tools: [canvas_draw, canvas_look, canvas_clear, paper_read]
+provides_hooks: [pre_llm_call, pre_tool_call, on_stream_delta, on_stream_end, post_llm_call]
+requires_env: []

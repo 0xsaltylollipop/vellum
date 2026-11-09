@@ -1,0 +1,49 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; font-src data:; img-src data:; media-src data: blob:">
+<style>
+/*KATEX_CSS*/
+  html, body { margin: 0; background: #19192F; overflow: hidden; }  /* the card's colour: hosts may paint an iframe white */
+  body { font-family: KaTeX_Main, Georgia, serif; color: #ECECEC; }
+  #frame { overflow: hidden; }
+  #scaler { width: 960px; height: 540px; transform-origin: 0 0; }
+  #stage { width: 960px; height: 540px; background: #19192F; border-radius: 2px; position: relative; overflow: hidden; }
+  /* Defaults only where the figure set nothing: a stylesheet rule would otherwise beat the model's own fill="…". */
+  #stage svg text { font-family: KaTeX_Main, Georgia, serif; }
+  #stage svg text:not([fill]) { fill: #ECECEC; }
+  /* A thin halo in the stage colour (Manim's "backstroke"), so a line crossing a label never strikes it through. */
+  #stage svg text:not([stroke]) { paint-order: stroke; stroke: #19192F; stroke-width: 6px; stroke-linejoin: round; stroke-opacity: .92; }
+  .math { white-space: nowrap; line-height: 1; text-shadow: 0 0 2px #19192F, 0 0 3px #19192F, 0 0 4px #19192F; }
+  #thinking { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: #A9ABD6; letter-spacing: .9px; text-transform: uppercase; font: 500 11px 'Aeonik Fono Pro','SF Mono',ui-monospace,Menlo,monospace; }
+  .pen { width: 46px; height: 46px; }
+  .pen path { fill: none; stroke: #3D5AFE; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 120; animation: scribble 1.6s ease-in-out infinite; }
+  @keyframes scribble { 0% { stroke-dashoffset: 120; } 50% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -120; } }
+  #below { padding-top: 8px; }
+  #cap { min-height: 24px; font: 16px/1.5 -apple-system, system-ui, sans-serif; letter-spacing: .15px; color: #E4ECFF; transition: opacity .2s; padding: 2px 2px 6px; text-shadow: 0 0 8px rgba(94,234,255,.22); }
+  /* streamed caption: each letter lands as a turquoise glow, then settles */
+  #cap .w { white-space: nowrap; }
+  #cap .ch { display: inline-block; opacity: 0; animation: pa-ch .9s ease-out forwards; }
+  @keyframes pa-ch {
+    0% { opacity: 0; filter: blur(5px); transform: translateY(3px); color: #FFFFFF; text-shadow: 0 0 10px #5EEAFF, 0 0 22px #3D5AFE; }
+    35% { opacity: 1; filter: blur(0); transform: none; color: #BFF6FF; text-shadow: 0 0 8px #5EEAFF, 0 0 18px rgba(61,90,254,.8); }
+    100% { opacity: 1; color: #E4ECFF; text-shadow: 0 0 8px rgba(94,234,255,.22); }
+  }
+  @media (prefers-reduced-motion: reduce) { #cap .ch { animation: none; opacity: 1; } }
+  /* knobs the figure adds: thin track, yellow handle (the key quantity's colour) */
+  #stage input[type=range] { -webkit-appearance: none; appearance: none; height: 4px; background: #343a46; border-radius: 2px; outline: none; }
+  #stage input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #FFD84D; box-shadow: 0 0 0 4px rgba(255,216,77,.18); cursor: grab; }
+  #stage input[type=range]:hover::-webkit-slider-thumb { box-shadow: 0 0 0 7px rgba(255,216,77,.22); }
+  #stage label, #stage .knob { font: 15px KaTeX_Main, Georgia, serif; color: #ECECEC; }
+</style>
+</head>
+<body>
+<div id="frame"><div id="scaler"><div id="stage"><div id="thinking"><svg class="pen" viewBox="0 0 46 46"><path d="M6 30 C 14 8, 22 40, 30 18 S 40 26, 40 12"/></svg><span>Looking at the passage…</span></div></div></div></div>
+<div id="below">
+  <div id="cap"></div>
+</div>
+<script>/*VENDOR_JS*/</script>
+<script>/*RUNTIME_JS*/</script>
+</body>
+</html>
