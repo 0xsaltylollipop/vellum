@@ -9,8 +9,10 @@ import { host, atom, useValue, STATUSBAR_AREAS } from '@hermes/plugin-sdk'
 import { jsx } from 'react/jsx-runtime'
 
 // Runs INSIDE the arXiv page (serialized with toString), so it must be self-contained.
-// Returns the api object the plugin installs as a read-only window property under a random name.
-function vellumInPage() {
+// Returns the object the plugin installs as a read-only window property. Scripts on the page can find that object,
+// so it has one entry point, and that only answers calls carrying `secret`: a value the plugin makes for each
+// install and passes in here, which page scripts never see.
+function vellumInPage(secret) {
   var queue = []
   var waiter = null
   var btn = null
@@ -346,18 +348,19 @@ function vellumInPage() {
     } else if (m.type === 'height' && m.height > 80) {
       c.frame.style.height = Math.min(1400, m.height) + 'px'
     } else if (m.type === 'piece_error') {
-      var w = c.waits['n' + m.n]; if (w) w.error = m.msg
+      var w = c.waits['n' + m.n]; if (w) w.error = String(m.msg).slice(0, 600)
     } else if (m.type === 'ran') {
       var r = c.waits['n' + m.n]
       if (r) {
         delete c.waits['n' + m.n]
         var res = { ok: !r.error, error: r.error || undefined, kind: r.error ? 'code' : undefined }
-        if (m.overlaps && m.overlaps.length) res.overlaps = m.overlaps.slice(0, 6).map(String)
-        if (m.outside && m.outside.length) res.outside = m.outside.slice(0, 6).map(String)
+        var brief = function (x) { return String(x).slice(0, 200) }
+        if (m.overlaps && m.overlaps.length) res.overlaps = Array.prototype.slice.call(m.overlaps, 0, 6).map(brief)
+        if (m.outside && m.outside.length) res.outside = Array.prototype.slice.call(m.outside, 0, 6).map(brief)
         r.done(res)
       }
     } else if (m.type === 'look' || m.type === 'cleared') {
-      var l = c.waits[m.req]; if (l) { delete c.waits[m.req]; l.done(m.type === 'look' ? { ok: true, layout: m.result, png: m.png, error: m.error } : { ok: true }) }
+      var l = c.waits[m.req]; if (l) { delete c.waits[m.req]; l.done(m.type === 'look' ? { ok: true, layout: m.result, png: m.png, error: m.error ? String(m.error).slice(0, 600) : undefined } : { ok: true }) }
     }
   })
 
@@ -495,7 +498,7 @@ function vellumInPage() {
     if (btn && !btn.contains(e.target)) hideButton()
   }
 
-  return {
+  var api = {
     install: function () {
       // arXiv's own HTML papers, and ar5iv (arXiv's HTML for papers its own converter doesn't cover): same format
       var host = location.hostname
@@ -538,16 +541,34 @@ function vellumInPage() {
       if (waiter) { var w = waiter; waiter = null; w({ type: 'end' }) }
     }
   }
+  return Object.freeze({
+    call: function (given, name, args) {
+      if (given !== secret || !Object.prototype.hasOwnProperty.call(api, name)) return null
+      return api[name].apply(null, args || [])
+    }
+  })
 }
 
-// The in-page script is installed under a fresh random name each time, as a read-only window property: scripts on
-// the page can't replace it to feed the plugin fake events. Built by concatenation, so nothing is interpolated.
-const newKey = () => '__vellum_' + Math.random().toString(36).slice(2, 12)
+// The in-page script is installed under a fresh name each time, as a frozen, read-only window property. Page
+// scripts can list window's properties and find it, so the name hides nothing: what keeps them from using it is the
+// secret each call must carry, made here and never stored on the page. The property is only defined once the page
+// is known to be an arXiv paper. Built by concatenation, so nothing is interpolated.
+const random = n => {
+  const a = new Uint32Array(n)
+  if (globalThis.crypto && globalThis.crypto.getRandomValues) globalThis.crypto.getRandomValues(a)
+  else for (let i = 0; i < n; i++) a[i] = Math.floor(Math.random() * 4294967296)
+  return Array.from(a, x => x.toString(36)).join('')
+}
+const newKey = () => ({ name: '__vellum_' + random(2), secret: random(6) })
 const installCode = key =>
-  '(function(){var api=(' + vellumInPage.toString() + ')();' +
-  'Object.freeze(api);Object.defineProperty(window,' + JSON.stringify(key) + ',{value:api,writable:false,configurable:false,enumerable:false});' +
-  'return api.install();})()'
-const onPage = (key, expr, otherwise) => '(window[' + JSON.stringify(key) + '] ? ' + expr + ' : ' + otherwise + ')'
+  '(function(){var api=(' + vellumInPage.toString() + ')(' + JSON.stringify(key.secret) + ');' +
+  'var res=api.call(' + JSON.stringify(key.secret) + ',"install",[]);' +
+  'if(res&&res.ok)Object.defineProperty(window,' + JSON.stringify(key.name) + ',{value:api,writable:false,configurable:false,enumerable:false});' +
+  'return res;})()'
+const callCode = (key, fn, args, otherwise) => {
+  const at = 'window[' + JSON.stringify(key.name) + ']'
+  return '(' + at + ' ? ' + at + '.call(' + JSON.stringify(key.secret) + ',' + JSON.stringify(fn) + ',' + JSON.stringify(args) + ') : ' + otherwise + ')'
+}
 
 const errText = err => (err && err.message) || String(err)
 const short = (s, n) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s }
@@ -578,7 +599,7 @@ export default {
     let key = newKey()  // where this instance's in-page script lives (renewed on every install)
     let liveCard = ''   // the figure the chat is talking to (LIVE), mirrored to /state
     const page = code => ctx.preview.executeJavaScript(code)
-    const call = (fn, ...args) => page(onPage(key, 'window[' + JSON.stringify(key) + '].' + fn + '(' + args.map(a => JSON.stringify(a)).join(',') + ')', 'null'))
+    const call = (fn, ...args) => page(callCode(key, fn, args, 'null'))
     const install = () => { key = newKey(); return page(installCode(key)) }
     const postState = () => ctx.rest('/state', { method: 'POST', body: { armed: $armed.get(), live: liveCard }, timeoutMs: 10000 }).catch(() => {})
 
@@ -612,14 +633,18 @@ export default {
 
     // Everything from the page is checked before it reaches the chat: a card id, an arXiv paper, bounded text.
     const CARD = /^pa-[a-z0-9]{1,30}$/
-    const PAPER = /^https:\/\/(arxiv\.org|ar5iv\.labs\.arxiv\.org|ar5iv\.org)\/html\//
+    const PAPER = /^https:\/\/(arxiv\.org|ar5iv\.labs\.arxiv\.org|ar5iv\.org)\/html\/[^)\s#`]{1,160}$/
+    const paperUrl = sel => String(sel.url || '').split('#')[0]
     const validEvent = ev => !!ev && typeof ev === 'object' && (!('cardId' in ev) || CARD.test(String(ev.cardId))) &&
       (!ev.selection || (typeof ev.selection.text === 'string' && ev.selection.text.length >= 15 &&
-        PAPER.test(String(ev.selection.url || ''))))
-    const passage = (sel, n) => {
-      const where = (sel.paperTitle ? '"' + short(sel.paperTitle, 90) + '"' : 'the paper') + ' (' + String(sel.url).split('#')[0].slice(0, 200) + ')' +
-        (sel.section ? ', ' + short(sel.section, 60) : '')
-      return { where, quote: String(sel.text).slice(0, n).split('\n').map(l => '> ' + l).join('\n') }
+        PAPER.test(paperUrl(ev.selection))))
+    // A draft's first line holds only what the plugin made itself: the checked paper URL and the card id (the agent
+    // half reads the paper and the canvas from that line alone). The title and the section name are page text, so
+    // they go into the quote with the passage, as its first line.
+    const draft = (lead, cardId, sel, n) => {
+      const source = [short(sel.paperTitle, 90), short(sel.section, 60)].filter(Boolean).join(' · ').replace(/`/g, "'")
+      const lines = (source ? ['📄 ' + source] : []).concat(String(sel.text).slice(0, n).split('\n'))
+      return { head: lead + ' this passage from the paper (' + paperUrl(sel) + ') on canvas `' + cardId + '`:', quote: lines.map(l => '> ' + l).join('\n') }
     }
 
     const visualize = async (cardId, sel) => {
@@ -630,9 +655,9 @@ export default {
         call('setStatus', cardId, 'Could not start: ' + errText(err))
         return
       }
-      const { where, quote } = passage(sel, 3000)
+      const { head, quote } = draft('✨ Visualize', cardId, sel, 3000)
       setLive(cardId)
-      const ok = await toDraft('✨ Visualize this passage from ' + where + ' on canvas `' + cardId + '`:\n\n' + quote)
+      const ok = await toDraft(head + '\n\n' + quote)
       call('setStatus', cardId, ok ? 'Ready in your Hermes chat: press Enter to send' : 'Open a Hermes chat first')
       if (!ok) host.notify({ kind: 'warning', message: 'Open a Hermes chat next to the paper, then try again.' })
     }
@@ -643,10 +668,10 @@ export default {
       setLive(cardId)
       // The chat this Ask belongs to, so a question spoken in another chat is never bound to it.
       const sessions = [host.state.focusedStoredSessionId.get(), host.state.focusedSessionId.get()].filter(Boolean)
-      ctx.rest('/selection', { method: 'POST', body: { id: cardId, ask: true, sessions, ...sel }, timeoutMs: 10000 }).catch(() => {})
+      ctx.rest('/selection', { method: 'POST', body: { id: cardId, ask: true, sessions, ...sel, url: paperUrl(sel) }, timeoutMs: 10000 }).catch(() => {})
       try { await ensureRuntime(); await call('openFigure', cardId) } catch (err) { /* the figure opens on the first stroke anyway */ }
-      const { where, quote } = passage(sel, 1500)
-      const ok = await toDraft('💬 Ask about this passage from ' + where + ' on canvas `' + cardId + '`:\n' + quote + '\n\n')
+      const { head, quote } = draft('💬 Ask about', cardId, sel, 1500)
+      const ok = await toDraft(head + '\n' + quote + '\n\n')
       if (!ok) host.notify({ kind: 'info', message: 'Open a Hermes chat next to the paper, or just ask out loud in a voice conversation.' })
     }
 
@@ -697,7 +722,7 @@ export default {
         if (Date.now() - beat > 15000) { beat = Date.now(); postState() }
         let ev
         try {
-          ev = await page(onPage(key, 'window[' + JSON.stringify(key) + '].wait()', 'Promise.resolve({ type: "gone" })'))
+          ev = await page(callCode(key, 'wait', [], 'Promise.resolve({ type: "gone" })'))
         } catch (err) {
           // The page went away (another site, a closed tab): stop without running anything in what is there now, so
           // Desktop never asks for permission on a site the user didn't turn Vellum on for.

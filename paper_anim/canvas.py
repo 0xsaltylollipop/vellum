@@ -19,7 +19,10 @@ from .config import data_dir
 log = logging.getLogger(__name__)
 PLUGIN_ID = "vellum"
 # Papers the plugin works with: arXiv's own HTML, and ar5iv (arXiv's HTML for older papers); both are LaTeXML pages.
-PAPER_URL = re.compile(r"https://(arxiv\.org|ar5iv\.labs\.arxiv\.org|ar5iv\.org)/html/[^)\s#]+")
+PAPER_URL = re.compile(r"https://(?:arxiv\.org|ar5iv\.labs\.arxiv\.org|ar5iv\.org)/html/[^)\s#`]{1,160}")
+CANVAS_ID = re.compile(r"pa-[a-z0-9]{1,30}")  # a figure card's id, as desktop/plugin.js makes them
+ERROR_MAX = 600  # characters of a figure's error message passed on to the model
+LOOK_MAX = 20000  # characters of canvas_look's layout report
 
 
 def relay_dir() -> Path:
@@ -44,7 +47,7 @@ def save_state(name: str, data: dict) -> None:
     if name not in ("state", "selection"):
         return
     p = relay_dir() / f"{name}.json"
-    tmp = p.with_suffix(".part")
+    tmp = p.with_suffix(f".{uuid.uuid4().hex[:8]}.part")  # two posts can land at once: each writes its own file
     tmp.write_text(json.dumps({**data, "t": time.time()}))
     tmp.replace(p)
 
@@ -119,20 +122,29 @@ def _request(event: str, payload: dict, timeout: float) -> dict:
 
 
 def _canvas(args: dict) -> str:
-    return str(args.get("canvas") or "").strip()[:40]
+    """The canvas id a tool was given, or "" when it isn't one of ours."""
+    canvas = str(args.get("canvas") or "").strip()
+    return canvas if CANVAS_ID.fullmatch(canvas) else ""
+
+
+def _bounded(out: dict) -> dict:
+    """A figure's error text is written by the figure's own code: pass on a bounded, one-line version."""
+    if isinstance(out, dict) and out.get("error"):
+        out["error"] = " ".join(str(out["error"]).split())[:ERROR_MAX]
+    return out
 
 
 def canvas_draw(args: dict, **kwargs) -> str:
     canvas, code = _canvas(args), str(args.get("code") or "")
     if not canvas or not code.strip():
-        return json.dumps({"ok": False, "error": "Need canvas and code."})
+        return json.dumps({"ok": False, "error": "Need code and the canvas id from the user's message (like pa-3f2c1)."})
     try:
         from . import turns
         after = turns.piece_after(str(kwargs.get("session_id") or kwargs.get("task_id") or ""))
-        out = _request("canvas.draw", {"canvas": canvas, "code": code[:60000], "after": after}, 30)
+        out = _bounded(_request("canvas.draw", {"canvas": canvas, "code": code[:60000], "after": after}, 30))
     except Exception as e:  # never raise into the agent loop
         log.debug("vellum: canvas_draw failed", exc_info=True)
-        out = {"ok": False, "error": f"draw failed: {e}"}
+        out = {"ok": False, "error": f"draw failed: {e}"[:ERROR_MAX]}
     # The reader is listening while you work: the next words should be spoken before the next step is written.
     if not out.get("ok"):
         # A mistake in the figure's code: fix it. Anything else (no paper open, card closed): don't retry.
@@ -156,13 +168,15 @@ def canvas_draw(args: dict, **kwargs) -> str:
 def canvas_look(args: dict, **kwargs):
     canvas = _canvas(args)
     if not canvas:
-        return json.dumps({"ok": False, "error": "Need canvas."})
+        return json.dumps({"ok": False, "error": "Need the canvas id from the user's message (like pa-3f2c1)."})
     try:
-        out = _request("canvas.look", {"canvas": canvas}, 20)
+        out = _bounded(_request("canvas.look", {"canvas": canvas}, 20))
     except Exception as e:
         return json.dumps({"ok": False, "error": f"look failed: {e}"})
     png = out.pop("png", None)
     text = json.dumps(out)
+    if len(text) > LOOK_MAX:  # the report is made inside the figure, by code the model wrote
+        text = json.dumps({"ok": bool(out.get("ok")), "note": "The layout report was too long to pass on; go by the picture."})
     if not png or not str(png).startswith("data:image/png;base64,"):
         return text
     # An image tool result: Hermes sees the canvas as pixels (Claude gets a native image block).
@@ -174,9 +188,9 @@ def canvas_look(args: dict, **kwargs):
 def canvas_clear(args: dict, **kwargs) -> str:
     canvas = _canvas(args)
     if not canvas:
-        return json.dumps({"ok": False, "error": "Need canvas."})
+        return json.dumps({"ok": False, "error": "Need the canvas id from the user's message (like pa-3f2c1)."})
     try:
-        return json.dumps(_request("canvas.clear", {"canvas": canvas}, 10))
+        return json.dumps(_bounded(_request("canvas.clear", {"canvas": canvas}, 10)))
     except Exception as e:
         return json.dumps({"ok": False, "error": f"clear failed: {e}"})
 

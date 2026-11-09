@@ -56,7 +56,7 @@ async def canvas_result(body: dict):
 @router.post("/paper")
 async def paper(body: dict):
     url = str(body.get("url") or "")[:500]
-    if not canvas.PAPER_URL.match(url):
+    if not canvas.PAPER_URL.fullmatch(url):
         raise HTTPException(400, "Only arXiv HTML papers (arxiv.org/html or ar5iv).")
     title = " ".join(str(body.get("title") or "").split())[:300]
     await asyncio.to_thread(canvas.save_paper, url, title, str(body.get("text") or "")[:600000])
@@ -73,17 +73,21 @@ async def voice(file: str):
 
 @router.post("/state")
 async def state(body: dict):
-    await asyncio.to_thread(canvas.save_state, "state", {"armed": bool(body.get("armed")), "live": str(body.get("live") or "")[:40]})
+    live = str(body.get("live") or "")
+    live = live if canvas.CANVAS_ID.fullmatch(live) else ""
+    await asyncio.to_thread(canvas.save_state, "state", {"armed": bool(body.get("armed")), "live": live})
     return {"ok": True}
 
 
 @router.post("/selection")
 async def selection(body: dict):
-    data = {k: str(body.get(k) or "")[:6000 if k == "text" else 500] for k in ("id", "text", "url", "section", "paperTitle")}
+    data = {"id": str(body.get("id") or ""), "url": str(body.get("url") or "").split("#")[0], "text": str(body.get("text") or "")[:6000]}
+    for k in ("section", "paperTitle"):  # page text: one bounded line each
+        data[k] = " ".join(str(body.get(k) or "").split())[:200]
     data["ask"] = bool(body.get("ask"))
     sessions = body.get("sessions") if isinstance(body.get("sessions"), list) else []
     data["sessions"] = [str(s)[:200] for s in sessions if isinstance(s, str) and s][:4]
-    if not data["id"].startswith("pa-") or len(data["text"]) < 15:
+    if not canvas.CANVAS_ID.fullmatch(data["id"]) or not canvas.PAPER_URL.fullmatch(data["url"]) or len(data["text"]) < 15:
         raise HTTPException(400, "bad selection")
     await asyncio.to_thread(canvas.save_state, "selection", data)
     return {"ok": True}

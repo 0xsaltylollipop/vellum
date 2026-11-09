@@ -28,9 +28,16 @@ log = logging.getLogger(__name__)
 CTX = None  # the plugin context, set in register(): used for dispatch_tool
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 OURS = re.compile(r"^(✨ Visualize this passage|💬 Ask about this passage)")
-CANVAS_ID = re.compile(r"`(pa-[a-z0-9]+)`")
-PAPER_URL = re.compile(r"\((" + pc.PAPER_URL.pattern + r")\)?")
-SENTENCE = re.compile(r"^(.+?[.!?…])(\s+)", re.S)  # needs the following space: "Qwen2.5" is not a sentence end
+# The first line of a Visualize / Ask draft, exactly as desktop/plugin.js writes it. It holds only what the plugin
+# itself made (a checked paper URL and a card id); everything that comes from the page sits in the quote below it,
+# so nothing a page writes can change which paper or which canvas a turn is about.
+HEADER = re.compile(r"(?:✨ Visualize this passage|💬 Ask about this passage) from the paper "
+                    r"\((?P<url>" + pc.PAPER_URL.pattern + r")\) on canvas `(?P<canvas>" + pc.CANVAS_ID.pattern + r")`:[ \t]*(?:\n|$)")
+SOURCE_LINE = "📄 "  # a quoted line naming the paper and section (for the reader and the model, not part of the passage)
+SENTENCE_END = re.compile(r"[.!?…](?=\s)")  # needs the following space: "Qwen2.5" is not a sentence end
+MAX_PIECE = 500              # the longest stretch of text voiced as one piece when no sentence end comes
+VOICE_MAX = 60               # sentences voiced per turn; any further ones are shown as captions (bounds TTS cost)
+SAY_MAX = 1000               # characters of one drawing step's `say` that are spoken
 NOT_SPOKEN = re.compile(r"\bpa-[a-z0-9]+\b|^[✓✔.\s]*$")  # canvas ids (bookkeeping), a bare "✓"
 
 _speaking: dict = {}         # session -> _Voice for the paper turn in progress (only paper turns may draw)
@@ -41,7 +48,8 @@ VOICE_WORKERS = 3            # text-to-speech calls in flight per turn
 SELECTION_FRESH_S = 120      # after 💬 Ask, the user's next spoken words within this window are its question
 # Turns where a person is at Hermes Desktop or a local terminal. Paper turns never come from cron, messaging
 # platforms or subagents, whatever their message says.
-INTERACTIVE = {"", "desktop", "local", "tui", "gui", "webui", "cli"}
+# An empty platform is not a person at a screen we know of, so it does not qualify.
+INTERACTIVE = {"desktop", "local", "tui", "gui", "webui", "cli"}
 CANVAS_TOOLS = {"canvas_draw", "canvas_look", "canvas_clear"}
 PAPER_TOOLS = CANVAS_TOOLS | {"paper_read"}
 ASK_HINT = "If they ask what something is or why it's needed, a before-and-after often shows it best."
@@ -178,36 +186,45 @@ def pre_llm_call(session_id="", user_message="", platform="", parent_session_id=
     # ✨ Visualize / 💬 Ask from the paper: the skill and the paper around the passage, every time (a long chat's
     # compaction may have summarised an earlier copy away).
     if OURS.match(msg):
-        canvas, url = CANVAS_ID.search(msg), PAPER_URL.search(msg)
-        if not canvas or not url:
+        m = HEADER.match(msg)
+        if not m:  # not the draft the plugin wrote (the first line was edited): an ordinary message
             return None
+        canvas, url = m.group("canvas"), m.group("url")
         pc.prune()
-        _start(session_id, canvas.group(1))
-        _announce(canvas.group(1))
+        _start(session_id, canvas)
+        _announce(canvas)
         sel = _state("selection")
-        if sel.get("id") == canvas.group(1) and not sel.get("used"):
+        if sel.get("id") == canvas and not sel.get("used"):
             _mark_used(sel)  # this Ask's question came typed: nothing left to bind a spoken one to
         parts = [head, _skill_text(), f"The quoted passage in their message comes from the paper. {UNTRUSTED}"]
         if msg.startswith("💬 Ask"):
             parts.append("They asked their own question about this quoted passage (their words around the quote): "
                          "answer exactly that, with a sketch of just what they asked. " + ASK_HINT)
-        quoted = "\n".join(l[2:] for l in msg.splitlines() if l.startswith("> ")) or msg
-        return _with_paper(parts, url.group(1), quoted)
+        quoted = "\n".join(l[2:] for l in msg.splitlines()
+                           if l.startswith("> ") and not l.startswith("> " + SOURCE_LINE)) or msg[m.end():]
+        return _with_paper(parts, url, quoted)
 
     # 💬 Ask, then the question said out loud (a voice conversation has no "💬 Ask" line).
     sel = _take_selection(session_id)
     if sel:
-        canvas = sel["id"]
+        canvas = str(sel["id"])
+        if not pc.CANVAS_ID.fullmatch(canvas):
+            return None
         _start(session_id, canvas)
         _announce(canvas)
-        quote = "\n".join("> " + l for l in str(sel.get("text", ""))[:3000].split("\n"))
+        # Only the checked URL and the card id go into our own sentence; the section name is page text, so it goes
+        # into the quote with the passage.
+        url = str(sel.get("url") or "")
+        url = url if pc.PAPER_URL.fullmatch(url) else ""
+        section = " ".join(str(sel.get("section") or "").replace("`", "").split())[:80]
+        lines = ([SOURCE_LINE + section] if section else []) + str(sel.get("text", ""))[:3000].split("\n")
+        quote = "\n".join("> " + l for l in lines)
         parts = [head, _skill_text(),
-                 f"The user highlighted this passage in the paper ({sel.get('url', '')}"
-                 f"{', ' + sel['section'] if sel.get('section') else ''}) and is asking about it in their message. "
-                 f"{UNTRUSTED}\n{quote}\n"
+                 f"The user highlighted this passage in the paper{' (' + url + ')' if url else ''} and is asking "
+                 f"about it in their message. {UNTRUSTED}\n{quote}\n"
                  f"Answer exactly what they asked, out loud and on canvas `{canvas}` (it opens under the highlight): "
                  "a figure focused on their question, not on the whole paragraph. " + ASK_HINT]
-        return _with_paper(parts, str(sel.get("url", "")), str(sel.get("text", "")))
+        return _with_paper(parts, url, str(sel.get("text", "")))
 
     # A follow-up in a chat that has a figure: answered out loud on it while it is LIVE; otherwise, normally.
     if session_id not in _paper_chats:
@@ -241,9 +258,13 @@ def pre_tool_call(tool_name="", args=None, task_id="", **kwargs):
         return {"action": "block", "message": (
             "Not available here: Vellum only draws in a paper turn (the user clicked Visualize or Ask, or "
             "a figure in this chat is LIVE). Answer in text; to draw again they can click Resume on the figure.")}
+    # A turn draws on its own figure only: the one named in the user's message, or the LIVE one in this chat.
+    if (str(args.get("canvas") or "").strip() if isinstance(args, dict) else "") != v.canvas:
+        return {"action": "block", "message": f"This turn's figure is canvas `{v.canvas}`: pass exactly that as "
+                                              "`canvas`. Other figures can't be changed from this turn."}
     if tool_name != "canvas_draw":
         return None
-    say = str(args.get("say") or "").strip() if isinstance(args, dict) else ""
+    say = str(args.get("say") or "").strip()[:SAY_MAX]
     with v.lock:
         v.flush()  # whatever was said in text before this step, even without a full stop
         if say:
@@ -303,17 +324,32 @@ class _Voice:
             if delta.strip():
                 self.talked = True
             self.buf += delta
-            while True:
-                m = SENTENCE.match(self.buf)
-                if not m or len(m.group(1).strip()) < 8:
-                    break
-                self._say(m.group(1))
-                self.buf = self.buf[m.end():]
+            self._split()
             # A sentence end with nothing after it yet: if the text stops here (Hermes moved on to writing a drawing
             # step), say it now instead of waiting for the stream to end. "Qwen2." (digit before the dot) waits.
-            if re.search(r"[^\d\s][.!?…][\"')\]]?\s*$", self.buf):
+            if re.search(r"[^\d\s][.!?…][\"')\]]?$", self.buf.rstrip()[-3:]):
                 size = len(self.buf)
                 threading.Timer(0.35, contextvars.copy_context().run, args=(self._settle, size)).start()
+
+    def _split(self):
+        """Say every finished sentence in the buffer. What stays behind is at most MAX_PIECE long, so the work per
+        streamed delta is bounded however long the reply gets and whatever it contains."""
+        buf, start, pos = self.buf, 0, 0
+        while True:
+            m = SENTENCE_END.search(buf, pos)
+            if m and m.end() - start <= MAX_PIECE:
+                end = m.end()
+                if len(buf[start:end].strip()) < 8:  # "Yes." is said together with the sentence after it
+                    pos = end
+                    continue
+            elif len(buf) - start > MAX_PIECE:  # no sentence end in sight: cut at a line break or a space
+                cut = max(buf.rfind("\n", start, start + MAX_PIECE), buf.rfind(" ", start, start + MAX_PIECE))
+                end = cut + 1 if cut > start else start + MAX_PIECE
+            else:
+                break
+            self._say(buf[start:end])
+            start = pos = end
+        self.buf = buf[start:]
 
     def _settle(self, size: int):
         with self.lock:
@@ -350,7 +386,7 @@ class _Voice:
                 return
             seq, text = item
             try:
-                ok = self._voice(seq, text)
+                ok = seq < VOICE_MAX and self._voice(seq, text)  # past the cap: a caption, no text-to-speech call
             except Exception:
                 log.debug("vellum: voicing a sentence failed", exc_info=True)
                 ok = False

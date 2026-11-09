@@ -13,7 +13,9 @@
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const post = msg => parent.postMessage(Object.assign({ pa: true }, msg), '*');
   let busy = false;
-  // CSP blocks every request except WebRTC, so the figure has no WebRTC at all.
+  // CSP blocks every request but does not cover WebRTC, so its constructors are removed from this window. A frame
+  // made inside the figure would have its own, but script-src lists only this page's two scripts by hash (see
+  // build.py), so such a frame can't run code of its own.
   for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel', 'RTCSessionDescription', 'RTCIceCandidate']) {
     try { Object.defineProperty(window, name, { value: undefined, writable: false, configurable: false }); } catch (e) { /* not present */ }
   }
@@ -95,8 +97,9 @@
     return out;
   }
 
-  // Figures only draw. Refuse the obvious ways out of the frame (the CSP already blocks every network request;
-  // the paper page also removes a figure that navigates away). Best effort: it explains the rule to the model.
+  // Figures only draw. This names the obvious ways out of the frame and refuses code that spells them out, so the
+  // model gets a clear error to fix. It is a lint, not a boundary (a computed name gets past it): the boundary is the
+  // sandbox and the CSP, and the paper page removes a figure that navigates away.
   const BLOCKED_PROPS = new Set(['location', 'opener', 'postMessage', 'cookie', 'domain', 'contentWindow', 'contentDocument',
     'RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel']);
   const BLOCKED_NAMES = new Set(['location', 'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'importScripts', 'RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel']);
@@ -121,15 +124,19 @@
     child._ref = !decl && !prop;
   }
 
-  // Every loop gets a tiny check (__loop) at the top of its body: a loop that runs flat out for more than LOOP_MS is
-  // stopped with an error instead of freezing the figure. A loop that runs later (a slider, a timer) starts afresh.
+  // Every loop gets a tiny check (__loop) at the top of its body: loops that keep the page busy for more than
+  // LOOP_MS without letting it breathe are stopped with an error instead of freezing the figure. The clock starts
+  // at the first loop pass and is reset only when the browser gets its turn again (a message to ourselves is
+  // delivered), so slow passes count in full; a loop that runs later (a slider, a timer) starts afresh.
+  // Loops only: deep recursion or one huge built-in call (a giant sort) is not covered.
   const LOOP_MS = 3000;
-  let loopStart = 0, loopSeen = 0;
+  let loopStart = 0;
+  const breath = new MessageChannel();
+  breath.port1.onmessage = () => { loopStart = 0; };
   function __loop() {
     const now = Date.now();
-    if (now - loopSeen > 50) loopStart = now;
-    loopSeen = now;
-    if (now - loopStart > LOOP_MS) throw new Error(`a loop ran for over ${LOOP_MS / 1000} s and was stopped`);
+    if (!loopStart) { loopStart = now; breath.port2.postMessage(0); }
+    else if (now - loopStart > LOOP_MS) throw new Error(`a loop ran for over ${LOOP_MS / 1000} s and was stopped`);
   }
   const LOOPS = new Set(['WhileStatement', 'DoWhileStatement', 'ForStatement', 'ForInStatement', 'ForOfStatement']);
   function addLoopGuards(code) {
