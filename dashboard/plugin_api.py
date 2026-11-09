@@ -81,6 +81,8 @@ async def state(body: dict):
 async def selection(body: dict):
     data = {k: str(body.get(k) or "")[:6000 if k == "text" else 500] for k in ("id", "text", "url", "section", "paperTitle")}
     data["ask"] = bool(body.get("ask"))
+    sessions = body.get("sessions") if isinstance(body.get("sessions"), list) else []
+    data["sessions"] = [str(s)[:200] for s in sessions if isinstance(s, str) and s][:4]
     if not data["id"].startswith("pa-") or len(data["text"]) < 15:
         raise HTTPException(400, "bad selection")
     await asyncio.to_thread(canvas.save_state, "selection", data)

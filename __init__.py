@@ -7,7 +7,7 @@ inside the paper and sends highlights and questions to the user's own Hermes ses
 """
 from pathlib import Path
 
-from .paper_anim import canvas, turns
+from .paper_anim import turns
 from .paper_anim.canvas import HANDLERS, SCHEMAS
 
 TOOLSET = "vellum"
@@ -15,7 +15,6 @@ TOOLSET = "vellum"
 
 def register(ctx):
     turns.CTX = ctx
-    canvas.prune()
     # Our turns only (a highlight or a question asked in the figure): quiet paper context in, live voice out.
     for hook in ("pre_llm_call", "pre_tool_call", "on_stream_delta", "on_stream_end", "post_llm_call"):
         ctx.register_hook(hook, getattr(turns, hook))

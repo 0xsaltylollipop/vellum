@@ -8,6 +8,7 @@ in different processes.
 """
 import hashlib
 import json
+import logging
 import re
 import time
 import uuid
@@ -15,6 +16,7 @@ from pathlib import Path
 
 from .config import data_dir
 
+log = logging.getLogger(__name__)
 PLUGIN_ID = "vellum"
 # Papers the plugin works with: arXiv's own HTML, and ar5iv (arXiv's HTML for older papers); both are LaTeXML pages.
 PAPER_URL = re.compile(r"https://(arxiv\.org|ar5iv\.labs\.arxiv\.org|ar5iv\.org)/html/[^)\s#]+")
@@ -28,7 +30,7 @@ def relay_dir() -> Path:
 
 
 def save_result(req: str, result: dict) -> None:
-    if not req.replace("-", "").isalnum():
+    if not re.fullmatch(r"[0-9a-f]{16}", req):  # the ids _request hands out
         return
     p = relay_dir() / "results" / f"{req}.json"
     tmp = p.with_suffix(".part")
@@ -87,8 +89,8 @@ def prune() -> None:
             try:
                 if f.is_file() and now - f.stat().st_mtime > age:
                     f.unlink()
-            except OSError:
-                pass
+            except OSError as e:
+                log.debug("vellum: could not prune %s: %s", f.name, e)
     papers = sorted((relay_dir() / "papers").glob("*.txt"), key=lambda f: f.stat().st_mtime, reverse=True)
     for f in papers[20:]:
         f.unlink(missing_ok=True)
@@ -129,6 +131,7 @@ def canvas_draw(args: dict, **kwargs) -> str:
         after = turns.piece_after(str(kwargs.get("session_id") or kwargs.get("task_id") or ""))
         out = _request("canvas.draw", {"canvas": canvas, "code": code[:60000], "after": after}, 30)
     except Exception as e:  # never raise into the agent loop
+        log.debug("vellum: canvas_draw failed", exc_info=True)
         out = {"ok": False, "error": f"draw failed: {e}"}
     # The reader is listening while you work: the next words should be spoken before the next step is written.
     if not out.get("ok"):
@@ -187,7 +190,8 @@ def paper_read(args: dict, **kwargs) -> str:
             latest = {"url": url, "key": paper_key(url), "title": ""}
         text = (papers / f"{latest['key']}.txt").read_text()
         latest["title"] = latest["title"] or text.split("\n", 1)[0].lstrip("# ")
-    except Exception:
+    except Exception as e:
+        log.debug("vellum: paper_read found no paper: %s", e)
         return json.dumps({"ok": False, "error": "No paper open. Open an arXiv paper's HTML version and switch Vellum on."})
     # Chunks stay well under Hermes's 100k-character tool-result spillover, so the paper lands IN the conversation
     # (not in a spill file), cut at a paragraph boundary.

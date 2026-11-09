@@ -638,7 +638,9 @@ export default {
     // dictated) and sends it. A question spoken in a voice conversation within two minutes is bound to it too.
     const askDraft = async (cardId, sel) => {
       setLive(cardId)
-      ctx.rest('/selection', { method: 'POST', body: { id: cardId, ask: true, ...sel }, timeoutMs: 10000 }).catch(() => {})
+      // The chat this Ask belongs to, so a question spoken in another chat is never bound to it.
+      const sessions = [host.state.focusedStoredSessionId.get(), host.state.focusedSessionId.get()].filter(Boolean)
+      ctx.rest('/selection', { method: 'POST', body: { id: cardId, ask: true, sessions, ...sel }, timeoutMs: 10000 }).catch(() => {})
       try { await ensureRuntime(); await call('openFigure', cardId) } catch (err) { /* the figure opens on the first stroke anyway */ }
       const { where, quote } = passage(sel, 1500)
       let ok = false
@@ -691,7 +693,9 @@ export default {
         try {
           ev = await page(onPage(key, 'window[' + JSON.stringify(key) + '].wait()', 'Promise.resolve({ type: "gone" })'))
         } catch (err) {
-          stop()
+          // The page went away (another site, a closed tab): stop without running anything in what is there now, so
+          // Desktop never asks for permission on a site the user didn't turn Vellum on for.
+          stop({ leavePage: true })
           host.notifyError(err, 'Vellum stopped')
           return
         }
@@ -701,7 +705,7 @@ export default {
           // Same-site navigation (a new paper, a reload) wiped the page script and its cards: put it back.
           if (liveCard) setLive(null)
           const res = await install().catch(() => null)
-          if (!res || !res.ok) { stop(); host.notify({ kind: 'info', message: 'Vellum paused: ' + ((res && res.reason) || 'page changed') }); return }
+          if (!res || !res.ok) { stop({ leavePage: true }); host.notify({ kind: 'info', message: 'Vellum paused: ' + ((res && res.reason) || 'page changed') }); return }
           sharePaper().catch(() => {})
         } else if (ev && ev.type === 'visualize') {
           visualize(ev.cardId, ev.selection)
@@ -736,12 +740,12 @@ export default {
       }
     }
 
-    function stop() {
+    function stop({ leavePage = false } = {}) {
       generation += 1
       $armed.set(false)
       liveCard = ''
       postState()
-      call('teardown').catch(() => {})
+      if (!leavePage) call('teardown').catch(() => {})
     }
 
     ctx.register({
