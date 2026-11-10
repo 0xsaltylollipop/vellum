@@ -21,7 +21,7 @@
   .pen path { fill: none; stroke: #3D5AFE; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 120; animation: scribble 1.6s ease-in-out infinite; }
   @keyframes scribble { 0% { stroke-dashoffset: 120; } 50% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -120; } }
   #below { padding-top: 8px; }
-  #cap { min-height: 72px; font: 16px/1.5 -apple-system, system-ui, sans-serif; letter-spacing: .15px; color: #E4ECFF; transition: opacity .2s; padding: 2px 2px 6px; text-shadow: 0 0 8px rgba(94,234,255,.22); }
+  #cap { box-sizing: border-box; min-height: 80px; font: 16px/1.5 -apple-system, system-ui, sans-serif; letter-spacing: .15px; color: #E4ECFF; transition: opacity .2s; padding: 2px 2px 6px; text-shadow: 0 0 8px rgba(94,234,255,.22); }
   /* streamed caption: each letter lands as a turquoise glow, then settles */
   #cap .w { white-space: nowrap; }
   #cap .ch { display: inline-block; opacity: 0; animation: pa-ch .9s ease-out forwards; }

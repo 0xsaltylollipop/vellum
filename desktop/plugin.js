@@ -99,7 +99,7 @@ function vellumInPage(secret) {
   }
 
   // Bump STYLE_V when the CSS changes: a page that already has an older copy (from before a plugin update) gets the new one.
-  var STYLE_V = '12'
+  var STYLE_V = '13'
   function ensureStyle() {
     var st = document.getElementById('pa-style')
     if (st && st.getAttribute('data-v') === STYLE_V) return
@@ -120,7 +120,7 @@ function vellumInPage(secret) {
       'font:14px/1.5 -apple-system,system-ui,sans-serif;animation:pa-emerge 1.2s cubic-bezier(.2,.7,.2,1) both}',
       '.pa-card::after{content:"";position:absolute;inset:0;z-index:-1;border:1px solid #2B3BFF;border-radius:4px;pointer-events:none;',
       'background:radial-gradient(120% 60% at 12% 0%,rgba(61,90,254,.20),transparent 60%),radial-gradient(90% 50% at 95% 100%,rgba(94,234,255,.08),transparent 65%),#19192F;',
-      'box-shadow:' + SMOKE + ';animation:pa-flash 1.4s ease-out .35s both}',
+      'box-shadow:' + SMOKE + ';animation:pa-flash 2.2s ease-out .35s both}',
       // Smoke: two blurred layers of blue, turquoise and violet plumes, each drifting on its own slow loop.
       '.pa-smoke{position:absolute;inset:-38px;z-index:-2;pointer-events:none;animation:pa-billow 2s ease-out both}',
       '.pa-smoke::before,.pa-smoke::after{content:"";position:absolute;inset:0;border-radius:48px;filter:blur(22px);will-change:transform,opacity}',
@@ -135,7 +135,7 @@ function vellumInPage(secret) {
       '@keyframes pa-emerge{0%{opacity:0;filter:blur(14px);transform:translateY(10px) scale(.985)}45%{opacity:.85}100%{opacity:1;filter:none;transform:none}}',
       '@keyframes pa-billow{0%{opacity:0;transform:scale(.8)}35%{opacity:1;transform:scale(1.18)}100%{opacity:1;transform:none}}',
       // Hermes's frame bloom: one flash of electric blue when the card arrives (nothing animates while you read)
-      '@keyframes pa-flash{0%{box-shadow:0 0 0 1px #3D5AFE,0 0 42px 6px rgba(0,0,242,.75)}100%{box-shadow:' + SMOKE + '}}',
+      '@keyframes pa-flash{0%{box-shadow:0 0 0 1px rgba(61,90,254,.7),0 0 34px 2px rgba(0,0,242,.35)}100%{box-shadow:' + SMOKE + '}}',
       // The highlight buttons, old-world: engraved serif capitals on dusky indigo, wrapped in murky smoke. Four wisps
       // (deep indigo, shadow, dim violet, muted teal) circle the pair at different speeds and directions.
       '.pa-bar{isolation:isolate;animation:pa-bar-in .5s ease-out}',
@@ -167,12 +167,12 @@ function vellumInPage(secret) {
       '@keyframes pa-pulse{0%,100%{opacity:.25}50%{opacity:1}}',
       '.pa-close{border:none;background:none;color:#A9ABD6;font:14px/1 ' + LABEL + ';cursor:pointer;padding:2px 4px}',
       '.pa-close:hover{color:#F2F2F2}',
-      '.pa-fig iframe{width:100%;height:560px;border:0;display:block;background:#19192F;border-radius:2px}',
+      '.pa-fig iframe{width:100%;height:560px;border:0;display:block;background:#19192F;border-radius:2px;transition:height .7s cubic-bezier(.2,.7,.2,1)}',
       // The passage Hermes is talking about: one soft glowing box behind it, with room around the letters.
       '.pa-glow{position:absolute;z-index:-1;pointer-events:none;border-radius:8px;background:rgba(61,90,254,.11);',
-      'box-shadow:0 0 0 1px rgba(61,90,254,.45),0 0 30px 4px rgba(0,0,242,.26),inset 0 0 26px rgba(94,234,255,.07);animation:pa-glow-in 1.4s ease-out both}',
+      'box-shadow:0 0 0 1px rgba(61,90,254,.45),0 0 30px 4px rgba(0,0,242,.26),inset 0 0 26px rgba(94,234,255,.07);animation:pa-glow-in 1.8s ease-out both}',
       // the passage glow bleeds in like ink: from a soft blur, with one slow swell of light
-      '@keyframes pa-glow-in{0%{opacity:0;filter:blur(10px);transform:scale(.97)}55%{opacity:1;box-shadow:0 0 0 1px rgba(94,234,255,.55),0 0 46px 10px rgba(0,0,242,.38),inset 0 0 30px rgba(94,234,255,.12)}100%{opacity:1;filter:none;transform:none}}',
+      '@keyframes pa-glow-in{0%{opacity:0;filter:blur(10px);transform:scale(.97)}55%{opacity:1;box-shadow:0 0 0 1px rgba(94,234,255,.4),0 0 40px 6px rgba(0,0,242,.24),inset 0 0 28px rgba(94,234,255,.1)}100%{opacity:1;filter:none;transform:none}}',
       // the LIVE pill: while it glows, what you say in the chat goes to this figure; click to leave
       '.pa-live{position:relative;display:flex;align-items:center;gap:7px;min-width:78px;justify-content:center;border-radius:3px;cursor:pointer;',
       'font:500 10.5px/1 ' + RUNE + ';letter-spacing:1.6px;text-transform:uppercase;padding:5px 10px 4px;transition:color .3s,background .3s,border-color .3s,text-shadow .3s}',
@@ -339,8 +339,12 @@ function vellumInPage(secret) {
       Object.keys(c.waits).forEach(function (k) { var w = c.waits[k]; delete c.waits[k]; w.done({ ok: false, error: 'The figure tried to leave its frame and was stopped. Figures can only draw.' }) })
       c.statusText.textContent = 'Figure stopped'
     })
+    // It opens from nothing to about its real size (the 960x540 stage at the card's width, plus the caption), so the
+    // paper below glides down instead of jumping; the figure then reports its exact height.
+    frame.style.height = '0px'
     c.fig.appendChild(frame)
     c.frame = frame
+    requestAnimationFrame(function () { frame.style.height = Math.round(c.fig.clientWidth * 540 / 960 + 96) + 'px' })
   }
 
   function toFigure(c, msg) {
