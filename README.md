@@ -9,7 +9,7 @@ Highlight a passage in an arXiv paper in Hermes's browser. Your own Hermes sessi
 It is not a video generator and not a separate app: it gives Hermes a new ability, **a canvas inside what you're reading**, plus a voice that stays in sync with the drawing.
 
 ## Try it
-1. Install it with `hermes plugins install vellum`, then turn it on in Hermes Desktop (Capabilities → Plugins → Vellum → On). Needs Hermes Desktop 0.22.6 or newer.
+1. Install it with `hermes plugins install vellum`, then turn it on in Hermes Desktop (Capabilities → Plugins → Vellum → On). Needs Hermes Desktop 0.22.7 or newer.
 2. Open an arXiv paper's HTML version in Hermes's browser (`arxiv.org/html/…`, or `ar5iv.labs.arxiv.org/html/…` for papers arXiv itself hasn't converted), with a Hermes chat next to it.
 3. Click **✨ Vellum** in the status bar (Desktop asks once to let it run on arxiv.org, and once more for ar5iv). Desktop asks for each site, so clicking it on any other page asks about that site: say no there. Vellum only works on arXiv HTML papers and switches itself off when you navigate away.
 4. Highlight a passage, then:

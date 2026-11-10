@@ -37,8 +37,12 @@ def _write(p: Path, text: str) -> None:
     """Write a file in one piece: a reader (another process) sees the old file or the new one, never half of it. Each
     write has its own temporary file, so two writes at once don't collide."""
     tmp = p.with_name(f".{p.name}.{uuid.uuid4().hex[:8]}.part")
-    tmp.write_text(text)
-    tmp.replace(p)
+    try:
+        tmp.write_text(text)
+        tmp.replace(p)
+    except BaseException:  # a failed write leaves nothing behind
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def save_result(req: str, result: dict) -> None:
@@ -87,6 +91,15 @@ def card(card_id: str) -> dict:
     """A card the user opened in Desktop ({} when it isn't one)."""
     c = _cards().get(card_id)
     return c if isinstance(c, dict) else {}
+
+
+OUR_MARKS = re.compile(r"\[(?=\s*vellum)|={3,}", re.I)  # our own markers' shapes: "[Vellum, for you only: …]", "=== … ==="
+
+
+def defuse(page_text: str) -> str:
+    """Page text loses the shape of our own notes to the model ("[Vellum" -> "(Vellum", "===" -> "---"). The length
+    stays the same, so offsets into the paper text still hold."""
+    return OUR_MARKS.sub(lambda m: "(" if m.group(0) == "[" else "-" * len(m.group(0)), page_text)
 
 
 def paper_key(url: str) -> str:
@@ -255,7 +268,7 @@ def vellum_read(args: dict, **kwargs) -> str:
         chunk = chunk[:chunk.rindex("\n\n") + 2]
     return json.dumps({"ok": True, "url": latest["url"], "title": latest["title"], "offset": start,
                        "next_offset": start + len(chunk), "total_chars": len(text),
-                       "more": start + len(chunk) < len(text), "text": chunk})
+                       "more": start + len(chunk) < len(text), "text": defuse(chunk)})
 
 
 CHUNK = 60000
