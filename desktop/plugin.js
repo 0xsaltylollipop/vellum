@@ -652,9 +652,10 @@ export default {
     // A draft's first line holds only what the plugin made itself: the checked paper URL and the card id (the agent
     // half reads the paper and the canvas from that line alone). The title and the section name are page text, so
     // they go into the quote with the passage, as its first line.
+    const defuse = s => String(s).replace(/[\u200b-\u200d\u2060\ufeff]/g, ' ').replace(/\[(?=\s*vellum)/gi, '(').replace(/={3,}/g, m => '-'.repeat(m.length))
     const draft = (lead, cardId, sel, n) => {
-      const source = [short(sel.paperTitle, 90), short(sel.section, 60)].filter(Boolean).join(' · ').replace(/`/g, "'")
-      const lines = (source ? ['📄 ' + source] : []).concat(String(sel.text).slice(0, n).split('\n'))
+      const source = defuse([short(sel.paperTitle, 90), short(sel.section, 60)].filter(Boolean).join(' · ').replace(/`/g, "'"))
+      const lines = (source ? ['📄 ' + source] : []).concat(defuse(String(sel.text).slice(0, n)).split('\n'))
       return { head: lead + ' this passage from the paper (' + paperUrl(sel) + ') on canvas `' + cardId + '`:', quote: lines.map(l => '> ' + l).join('\n') }
     }
 
@@ -696,7 +697,7 @@ export default {
       ctx.rest('/selection', { method: 'POST', body: { id: cardId, ask: true, sessions, ...sel, url: paperUrl(sel) }, timeoutMs: 10000 }).catch(() => {})
       try { await ensureRuntime(); await call('openFigure', cardId) } catch (err) { /* the figure opens on the first stroke anyway */ }
       const { head, quote } = draft('💬 Ask about', cardId, sel, 1500)
-      const ok = await toDraft(head + '\n' + quote + '\n\n')
+      const ok = await toDraft(head + '\n' + quote + '\n\nMy question: ')
       if (!ok) host.notify({ kind: 'info', message: 'Open a Hermes chat next to the paper, or just ask out loud in a voice conversation.' })
     }
 
@@ -740,22 +741,31 @@ export default {
       } catch (err) { /* a sentence that can't be fetched is just not heard */ }
     })
 
+    const PAGE_WAIT_MS = 25000
     const loop = async gen => {
       let beat = 0
       while ($armed.get() && gen === generation) {
         // Re-confirm "on" every ~20 s, so the hooks and tools see a closed or crashed Desktop as off.
         if (Date.now() - beat > 15000) { beat = Date.now(); postState() }
+        // The page answers every wait within 20 s (with 'idle' when nothing happened). No answer means it navigated or
+        // closed mid-wait: Desktop then never settles the call (0.22.x) or cancels it (0.23.x).
         let ev
         try {
-          ev = await page(callCode(key, 'wait', [], 'Promise.resolve({ type: "gone" })'))
+          ev = await Promise.race([
+            page(callCode(key, 'wait', [], 'Promise.resolve({ type: "gone" })')),
+            new Promise(resolve => ctx.setTimeout(() => resolve(null), PAGE_WAIT_MS))
+          ])
         } catch (err) {
-          // The page went away (another site, a closed tab): stop without running anything in what is there now, so
-          // Desktop never asks for permission on a site the user didn't turn Vellum on for.
-          stop({ leavePage: true })
-          host.notifyError(err, 'Vellum stopped')
-          return
+          ev = null
         }
         if (gen !== generation) return
+        if (ev === null) {
+          // Pause without running anything in what is there now (Desktop would ask for permission on a new site); one
+          // click on the chip turns Vellum back on for the next paper.
+          stop({ leavePage: true })
+          host.notify({ kind: 'info', message: 'Vellum paused: the page changed. Click ✨ Vellum to turn it on for this paper.' })
+          return
+        }
         if (!validEvent(ev)) continue
         if (ev.type === 'gone') {
           // Same-site navigation (a new paper, a reload) wiped the page script and its cards: put it back.

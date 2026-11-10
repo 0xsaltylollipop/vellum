@@ -1,6 +1,6 @@
-"""Hermes's own turns about the paper: what it quietly knows, and its voice.
+"""Hermes's own turns about the paper: the paper context it gets, and its voice.
 
-Hermes calls these hooks on every turn; they act only on paper turns and return at once otherwise:
+Hermes calls these hooks on every turn; they do their work on paper turns (on others they only refuse the figure tools):
 a "✨ Visualize this passage …" / "💬 Ask about this passage …" message from the paper, the user's spoken
 question right after 💬 Ask, or a follow-up while a figure is LIVE.
 
@@ -27,11 +27,12 @@ from . import canvas as pc
 log = logging.getLogger(__name__)
 CTX = None  # the plugin context, set in register(): used for dispatch_tool
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-OURS = re.compile(r"^(✨ Visualize this passage|💬 Ask about this passage)")
+OURS = re.compile(r"(?m)^(✨ Visualize this passage|💬 Ask about this passage)")
 # The first line of a Visualize / Ask draft, exactly as desktop/plugin.js writes it. It holds only what the plugin
 # itself made (a checked paper URL and a card id); everything that comes from the page sits in the quote below it,
 # so nothing a page writes can change which paper or which canvas a turn is about.
-HEADER = re.compile(r"(?:✨ Visualize this passage|💬 Ask about this passage) from the paper "
+# Desktop appends a draft after whatever was already in the chat box, so it is found at the start of any line.
+HEADER = re.compile(r"(?m)^(?:✨ Visualize this passage|💬 Ask about this passage) from the paper "
                     r"\((?P<url>" + pc.PAPER_URL.pattern + r")\) on canvas `(?P<canvas>" + pc.CANVAS_ID.pattern + r")`:[ \t]*(?:\n|$)")
 SOURCE_LINE = "📄 "  # a quoted line naming the paper and section (for the reader and the model, not part of the passage)
 SENTENCE_END = re.compile(r"[.!?…](?=\s)")  # needs the following space: "Qwen2.5" is not a sentence end
@@ -184,13 +185,14 @@ def pre_llm_call(session_id="", user_message="", platform="", parent_session_id=
     msg = user_message if isinstance(user_message, str) else " ".join(
         p.get("text", "") for p in user_message if isinstance(p, dict))
     msg = msg or ""
-    head = "[Vellum, for you only: the user sees just their message.]"
+    head = "[Vellum context for this turn; the chat shows only the user's message.]"
 
     # ✨ Visualize / 💬 Ask from the paper: the skill and the paper around the passage, every time (a long chat's
     # compaction may have summarised an earlier copy away).
-    if OURS.match(msg):
-        m = HEADER.match(msg)
-        if not m:  # not the draft the plugin wrote (the first line was edited): an ordinary message
+    if OURS.search(msg):
+        found = list(HEADER.finditer(msg))
+        m = found[-1] if found else None
+        if not m:  # not the draft the plugin wrote (its first line was edited): an ordinary message
             return None
         canvas, url = m.group("canvas"), m.group("url")
         # Only a card the user opened in Desktop, for this paper, starts a paper turn; the chat that sends it first owns
@@ -204,10 +206,10 @@ def pre_llm_call(session_id="", user_message="", platform="", parent_session_id=
         if sel.get("id") == canvas and not sel.get("used"):
             _mark_used(sel)  # this Ask's question came typed: nothing left to bind a spoken one to
         parts = [head, _skill_text(), f"The quoted passage in their message comes from the paper. {UNTRUSTED}"]
-        if msg.startswith("💬 Ask"):
+        if m.group(0).startswith("💬 Ask"):
             parts.append("They asked their own question about this quoted passage (their words around the quote): "
                          "answer exactly that, with a sketch of just what they asked. " + ASK_HINT)
-        quoted = "\n".join(l[2:] for l in msg.splitlines()
+        quoted = "\n".join(l[2:] for l in msg[m.end():].splitlines()
                            if l.startswith("> ") and not l.startswith("> " + SOURCE_LINE)) or msg[m.end():]
         return _with_paper(parts, url, quoted)
 
@@ -215,7 +217,7 @@ def pre_llm_call(session_id="", user_message="", platform="", parent_session_id=
     sel = _take_selection(session_id)
     if sel:
         canvas = str(sel["id"])
-        if not pc.CANVAS_ID.fullmatch(canvas):
+        if not pc.CANVAS_ID.fullmatch(canvas) or _owner.get(canvas, session_id) != session_id:
             return None
         _start(session_id, canvas)
         _announce(canvas)
@@ -251,8 +253,8 @@ def pre_llm_call(session_id="", user_message="", platform="", parent_session_id=
 
 def pre_tool_call(tool_name="", args=None, task_id="", **kwargs):
     """Each drawing step carries what Hermes says as it appears (`say`): voice it now, and show the piece when that
-    sentence starts playing. Text Hermes wrote before the call is spoken first. A step with nothing to say at all is
-    shown when Hermes's next sentence starts, so the drawing never runs ahead of the voice."""
+    sentence starts playing. Text Hermes wrote before the call is spoken first. A step with nothing to say is shown
+    with the sentence already playing."""
     if tool_name not in PAPER_TOOLS:
         return None
     session = kwargs.get("session_id") or task_id
@@ -277,11 +279,9 @@ def pre_tool_call(tool_name="", args=None, task_id="", **kwargs):
         v.flush()  # whatever was said in text before this step, even without a full stop
         if say:
             v._say(say)
-        if say or v.talked:
-            v.after = {"turn": v.turn, "seq": v.seq - 1} if v.seq else None
-        else:
-            v.after = {"turn": v.turn, "seq": v.seq}
-        v.talked = False
+        # Shown when the latest sentence starts: this step's own, or (a step with nothing to say) the one before it.
+        # Waiting for a later one could stall: in a batch of steps, the next sentence only comes with the next step.
+        v.after = {"turn": v.turn, "seq": v.seq - 1} if v.seq else None
     return None
 
 
@@ -318,7 +318,6 @@ class _Voice:
     def __init__(self, canvas: str):
         self.canvas, self.buf, self.seq, self.turn = canvas, "", 0, uuid.uuid4().hex[:8]
         self.lock = threading.RLock()
-        self.talked = False  # anything said since the last drawing step
         self.after = None  # the sentence the next drawing piece belongs to (shown when the voice reaches it)
         self.q: queue.Queue = queue.Queue()
         # A few sentences are voiced at once: one slow text-to-speech call never holds up the next (the card plays
@@ -329,8 +328,6 @@ class _Voice:
 
     def feed(self, delta: str):
         with self.lock:
-            if delta.strip():
-                self.talked = True
             self.buf += delta
             self._split()
             # A sentence end with nothing after it yet: if the text stops here (Hermes moved on to writing a drawing

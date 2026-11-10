@@ -21,7 +21,12 @@
   }
 
   // ---- fit the 960x540 stage to the card width ----
+  // The caption area may grow for a long sentence but never shrinks back until the board is cleared, so the card
+  // doesn't jump up and down as sentences change.
+  let capMin = 0;
   function fit() {
+    const capH = cap.offsetHeight;
+    if (capH > capMin) { capMin = capH; cap.style.minHeight = capMin + 'px'; }
     const k = Math.min(1, window.innerWidth / 960);
     document.getElementById('scaler').style.transform = `scale(${k})`;
     document.getElementById('frame').style.height = Math.ceil(540 * k) + 'px';  // the scaled stage's real footprint
@@ -244,6 +249,13 @@
     while (!reached() && Date.now() < end) await sleep(80);
   }
 
+  // Until this step's animations are done (d3 transitions and our fade-ins), at most `ms`; looping ones never end.
+  async function settled(ms) {
+    const end = Date.now() + ms;
+    const moving = () => !!stage.querySelector('.pa-in') || [...stage.querySelectorAll('*')].some(n => n.__transition);
+    while (Date.now() < end && safely(moving)) await sleep(80);
+  }
+
   const queue = [];
   const STEP_MS = 8000;  // the longest one drawing step may run
   async function pump() {
@@ -296,12 +308,38 @@
         safely(unhaloDark);
         if (!error) safely(() => fadeIn(added, before));
         setTimeout(() => { safely(repairMath); safely(nudgeInside); safely(raiseLabels); safely(unhaloDark); }, 900);  // after its animations
+        await settled(1500);  // check the picture as it ends up, not mid-animation (a fading label reads as invisible)
         lay = safely(layoutCheck) || lay;  // labels that overlap or are cut off, so they get fixed in the next step
       } finally {
         post({ type: 'ran', n: piece.n, overlaps: (lay.overlaps || []).slice(0, 6), outside: (lay.outside || []).slice(0, 6) });
       }
     }
     busy = false;
+  }
+
+  // What, if anything, makes a label hard to read: a filled shape covering part of it (a label sitting fully inside a
+  // shape, like a name inside its bar, is deliberate), or a line running through it (a line that only ends at its edge,
+  // like an arrow pointing at it, is fine). Lines are followed along their course, not their bounding box.
+  function markOver(a, shapes, strokes) {
+    for (const b of shapes) {
+      const ix = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)), iy = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+      const inside = a.left >= b.left - 1 && a.right <= b.right + 1 && a.top >= b.top - 1 && a.bottom <= b.bottom + 1;
+      if (!inside && ix * iy > 0.15 * a.width * a.height) return 'a shape';
+    }
+    const m = 3, box = { l: a.left + m, r: a.right - m, t: a.top + m, b: a.bottom - m };  // ignore lines that only touch the edge
+    if (box.r <= box.l || box.b <= box.t) return '';
+    for (const el of strokes) {
+      const lr = el.getBoundingClientRect();
+      if (lr.right < box.l || lr.left > box.r || lr.bottom < box.t || lr.top > box.b) continue;
+      const ctm = el.getScreenCTM(), len = el.getTotalLength();
+      if (!ctm || !len) continue;
+      let inside = 0;
+      for (let d = 0; d <= len; d += Math.max(2, len / 400)) {
+        const p = el.getPointAtLength(d).matrixTransform(ctm);
+        if (p.x > box.l && p.x < box.r && p.y > box.t && p.y < box.b && ++inside >= 3) return 'a line';
+      }
+    }
+    return '';
   }
 
   // Layout self-check: after every drawing step, and for vellum_look: visible things outside the stage, overlapping labels.
@@ -317,7 +355,18 @@
       if (r.width < 1 && r.height < 1) continue;
       if (r.left < R.left - 2 || r.top < R.top - 2 || r.right > R.right + 2 || r.bottom > R.bottom + 2) outside.push(el.tagName + ':' + (el.textContent || '').trim().slice(0, 30));
     }
-    const labels = items.filter(el => el.tagName === 'text' || el.tagName === 'foreignObject')
+    // Every other mark a label could be hidden by: filled shapes (by their box) and lines (by their actual course).
+    const isLabel = el => el.tagName === 'text' || el.tagName === 'foreignObject';
+    const shapes = [], strokes = [];
+    for (const el of items) {
+      if (isLabel(el) || !(el instanceof SVGGraphicsElement)) continue;
+      const cs = getComputedStyle(el), r = el.getBoundingClientRect();
+      if (r.width * r.height > 0.4 * R.width * R.height) continue;  // as large as a background
+      const filled = cs.fill !== 'none' && +cs.fillOpacity > 0.05 && ['rect', 'circle', 'ellipse', 'polygon', 'path'].includes(el.tagName);
+      if (filled && r.width > 2 && r.height > 2) shapes.push(r);
+      else if (cs.stroke !== 'none' && typeof el.getTotalLength === 'function') strokes.push(el);
+    }
+    const labels = items.filter(isLabel)
       .map(el => ({ t: (el.textContent || '').trim().slice(0, 25), r: (el.tagName === 'foreignObject' && el.firstElementChild || el).getBoundingClientRect() }))
       .filter(o => o.r.width > 2 && o.t);
     const overlaps = [];
@@ -326,6 +375,10 @@
       const ix = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)), iy = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
       // also catch slivers: text running into the next label on the same line
       if (ix * iy > 0.25 * Math.min(a.width * a.height, b.width * b.height) || (ix > 3 && iy > 0.5 * Math.min(a.height, b.height))) overlaps.push(labels[i].t + ' / ' + labels[j].t);
+    }
+    for (const l of labels) {
+      const hit = markOver(l.r, shapes, strokes);
+      if (hit) overlaps.push(l.t + ' / ' + hit);
     }
     return { outside, overlaps, labels: labels.length };
   }
@@ -362,6 +415,7 @@
     old.forEach(el => el.remove());
     for (const k of Object.keys(S)) delete S[k];
     cap.textContent = ''; cap.style.opacity = 1;
+    capMin = 0; cap.style.minHeight = '';
     fit();
   }
 
@@ -417,7 +471,8 @@
     }
     clearTimeout(voice.timer); voice.timer = null;
     const v = voice.q.splice(i, 1)[0], turn = voice.turn;
-    const done = () => { if (voice.turn !== turn) return; voice.playing = null; voice.next = Math.max(voice.next, v.seq + 1); playVoice(); };
+    let finished = false;  // an unplayable clip can report twice (its error event and play()'s rejection): move on once
+    const done = () => { if (finished || voice.turn !== turn) return; finished = true; voice.playing = null; voice.next = Math.max(voice.next, v.seq + 1); playVoice(); };
     if (v.failed || !v.src) {  // not voiced: show it as a caption for about as long as it would take to say
       voice.playing = { pause() {} };
       streamCaption(v.text, v.text.split(/\s+/).length / 2.8);
