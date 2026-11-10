@@ -10,6 +10,7 @@ import hashlib
 import json
 import logging
 import re
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -22,7 +23,7 @@ PLUGIN_ID = "vellum"
 PAPER_URL = re.compile(r"https://(?:arxiv\.org|ar5iv\.labs\.arxiv\.org|ar5iv\.org)/html/[^)\s#`]{1,160}")
 CANVAS_ID = re.compile(r"pa-[a-z0-9]{1,30}")  # a figure card's id, as desktop/plugin.js makes them
 ERROR_MAX = 600  # characters of a figure's error message passed on to the model
-LOOK_MAX = 20000  # characters of canvas_look's layout report
+LOOK_MAX = 20000  # characters of vellum_look's layout report
 
 
 def relay_dir() -> Path:
@@ -32,13 +33,18 @@ def relay_dir() -> Path:
     return d
 
 
+def _write(p: Path, text: str) -> None:
+    """Write a file in one piece: a reader (another process) sees the old file or the new one, never half of it. Each
+    write has its own temporary file, so two writes at once don't collide."""
+    tmp = p.with_name(f".{p.name}.{uuid.uuid4().hex[:8]}.part")
+    tmp.write_text(text)
+    tmp.replace(p)
+
+
 def save_result(req: str, result: dict) -> None:
     if not re.fullmatch(r"[0-9a-f]{16}", req):  # the ids _request hands out
         return
-    p = relay_dir() / "results" / f"{req}.json"
-    tmp = p.with_suffix(".part")
-    tmp.write_text(json.dumps(result))
-    tmp.replace(p)
+    _write(relay_dir() / "results" / f"{req}.json", json.dumps(result))
 
 
 def save_state(name: str, data: dict) -> None:
@@ -46,10 +52,41 @@ def save_state(name: str, data: dict) -> None:
     ("selection"). The hooks run in Hermes's agent process, the routes in the plugin host: a file bridges them."""
     if name not in ("state", "selection"):
         return
-    p = relay_dir() / f"{name}.json"
-    tmp = p.with_suffix(f".{uuid.uuid4().hex[:8]}.part")  # two posts can land at once: each writes its own file
-    tmp.write_text(json.dumps({**data, "t": time.time()}))
-    tmp.replace(p)
+    _write(relay_dir() / f"{name}.json", json.dumps({**data, "t": time.time()}))
+
+
+CARDS_KEPT = 50  # the most recent figure cards the user opened (older ones can no longer start a paper turn)
+_cards_lock = threading.Lock()
+
+
+def save_card(card_id: str, url: str, sessions: list) -> bool:
+    """The user clicked ✨ Visualize or 💬 Ask on a passage: Desktop registers the card it opened. A paper turn is only
+    ever started for a card registered here, so a message that merely looks like a Vellum draft is an ordinary one.
+    `sessions` are the ids of the Desktop chat it was clicked in, when it has any yet."""
+    url = url.split("#")[0]
+    if not CANVAS_ID.fullmatch(card_id) or not PAPER_URL.fullmatch(url):
+        return False
+    with _cards_lock:
+        cards = _cards()
+        cards[card_id] = {"url": url, "sessions": [str(s)[:200] for s in sessions if isinstance(s, str) and s][:4],
+                          "t": time.time()}
+        newest = sorted(cards.items(), key=lambda kv: kv[1].get("t", 0))[-CARDS_KEPT:]
+        _write(relay_dir() / "cards.json", json.dumps(dict(newest)))
+    return True
+
+
+def _cards() -> dict:
+    try:
+        cards = json.loads((relay_dir() / "cards.json").read_text())
+        return cards if isinstance(cards, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def card(card_id: str) -> dict:
+    """A card the user opened in Desktop ({} when it isn't one)."""
+    c = _cards().get(card_id)
+    return c if isinstance(c, dict) else {}
 
 
 def paper_key(url: str) -> str:
@@ -59,8 +96,8 @@ def paper_key(url: str) -> str:
 
 def save_paper(url: str, title: str, text: str) -> None:
     key = paper_key(url)
-    (relay_dir() / "papers" / f"{key}.txt").write_text(f"# {title}\n{url}\n\n{text}")
-    (relay_dir() / "papers" / "latest.json").write_text(json.dumps({"url": url, "title": title, "key": key}))
+    _write(relay_dir() / "papers" / f"{key}.txt", f"# {title}\n{url}\n\n{text}")
+    _write(relay_dir() / "papers" / "latest.json", json.dumps({"url": url, "title": title, "key": key}))
 
 
 STATE_FRESH_S = 75  # Desktop re-confirms "on" about every 20 s; older than this (Desktop closed or crashed) is off
@@ -134,7 +171,7 @@ def _bounded(out: dict) -> dict:
     return out
 
 
-def canvas_draw(args: dict, **kwargs) -> str:
+def vellum_draw(args: dict, **kwargs) -> str:
     canvas, code = _canvas(args), str(args.get("code") or "")
     if not canvas or not code.strip():
         return json.dumps({"ok": False, "error": "Need code and the canvas id from the user's message (like pa-3f2c1)."})
@@ -143,7 +180,7 @@ def canvas_draw(args: dict, **kwargs) -> str:
         after = turns.piece_after(str(kwargs.get("session_id") or kwargs.get("task_id") or ""))
         out = _bounded(_request("canvas.draw", {"canvas": canvas, "code": code[:60000], "after": after}, 30))
     except Exception as e:  # never raise into the agent loop
-        log.debug("vellum: canvas_draw failed", exc_info=True)
+        log.debug("vellum: vellum_draw failed", exc_info=True)
         out = {"ok": False, "error": f"draw failed: {e}"[:ERROR_MAX]}
     # The reader is listening while you work: the next words should be spoken before the next step is written.
     if not out.get("ok"):
@@ -165,7 +202,7 @@ def canvas_draw(args: dict, **kwargs) -> str:
     return json.dumps(out)
 
 
-def canvas_look(args: dict, **kwargs):
+def vellum_look(args: dict, **kwargs):
     canvas = _canvas(args)
     if not canvas:
         return json.dumps({"ok": False, "error": "Need the canvas id from the user's message (like pa-3f2c1)."})
@@ -185,7 +222,7 @@ def canvas_look(args: dict, **kwargs):
                         {"type": "image_url", "image_url": {"url": png}}]}
 
 
-def canvas_clear(args: dict, **kwargs) -> str:
+def vellum_clear(args: dict, **kwargs) -> str:
     canvas = _canvas(args)
     if not canvas:
         return json.dumps({"ok": False, "error": "Need the canvas id from the user's message (like pa-3f2c1)."})
@@ -195,7 +232,7 @@ def canvas_clear(args: dict, **kwargs) -> str:
         return json.dumps({"ok": False, "error": f"clear failed: {e}"})
 
 
-def paper_read(args: dict, **kwargs) -> str:
+def vellum_read(args: dict, **kwargs) -> str:
     papers = relay_dir() / "papers"
     try:
         latest = json.loads((papers / "latest.json").read_text())
@@ -205,7 +242,7 @@ def paper_read(args: dict, **kwargs) -> str:
         text = (papers / f"{latest['key']}.txt").read_text()
         latest["title"] = latest["title"] or text.split("\n", 1)[0].lstrip("# ")
     except Exception as e:
-        log.debug("vellum: paper_read found no paper: %s", e)
+        log.debug("vellum: vellum_read found no paper: %s", e)
         return json.dumps({"ok": False, "error": "No paper open. Open an arXiv paper's HTML version and switch Vellum on."})
     # Chunks stay well under Hermes's 100k-character tool-result spillover, so the paper lands IN the conversation
     # (not in a spill file), cut at a paragraph boundary.
@@ -224,8 +261,8 @@ def paper_read(args: dict, **kwargs) -> str:
 CHUNK = 60000
 CANVAS = "Canvas id, as given in the user's message (e.g. 'pa-3f2c1')."
 SCHEMAS = {
-    "canvas_draw": {
-        "name": "canvas_draw",
+    "vellum_draw": {
+        "name": "vellum_draw",
         "description": (
             "Draw one step on a live canvas inside the paper the user is reading (960x540 SVG stage, dark), and say "
             "what it means as it appears: `say` is spoken aloud and the piece shows up as you start saying it. "
@@ -240,22 +277,22 @@ SCHEMAS = {
             "code": {"type": "string", "description": "This step's piece of the figure: a few lines to about 25."}},
             "required": ["canvas", "say", "code"]},
     },
-    "canvas_look": {
-        "name": "canvas_look",
+    "vellum_look": {
+        "name": "vellum_look",
         "description": ("See the canvas as the reader sees it: a picture plus a layout report (labels outside "
                         "the canvas, overlapping labels, the readout text). Each drawing step already reports overlaps; "
                         "use this only when you're unsure how the figure looks."),
         "parameters": {"type": "object", "properties": {"canvas": {"type": "string", "description": CANVAS}},
                        "required": ["canvas"]},
     },
-    "canvas_clear": {
-        "name": "canvas_clear",
+    "vellum_clear": {
+        "name": "vellum_clear",
         "description": "Erase the canvas and forget its variables, to start the figure over.",
         "parameters": {"type": "object", "properties": {"canvas": {"type": "string", "description": CANVAS}},
                        "required": ["canvas"]},
     },
-    "paper_read": {
-        "name": "paper_read",
+    "vellum_read": {
+        "name": "vellum_read",
         "description": ("Read the full text of the paper open in Hermes's browser (the one the user is "
                         "highlighting in), formulas as LaTeX, tables one cell per line. Read it once per paper: it comes "
                         "in chunks, so while `more` is true call again with offset = offset + len(text). If you already "
@@ -265,4 +302,4 @@ SCHEMAS = {
             "offset": {"type": "integer", "description": "Character offset for the next chunk (default 0)."}}},
     },
 }
-HANDLERS = {"canvas_draw": canvas_draw, "canvas_look": canvas_look, "canvas_clear": canvas_clear, "paper_read": paper_read}
+HANDLERS = {"vellum_draw": vellum_draw, "vellum_look": vellum_look, "vellum_clear": vellum_clear, "vellum_read": vellum_read}

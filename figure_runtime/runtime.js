@@ -100,12 +100,14 @@
   // Figures only draw. This names the obvious ways out of the frame and refuses code that spells them out, so the
   // model gets a clear error to fix. It is a lint, not a boundary (a computed name gets past it): the boundary is the
   // sandbox and the CSP, and the paper page removes a figure that navigates away.
-  const BLOCKED_PROPS = new Set(['location', 'opener', 'postMessage', 'cookie', 'domain', 'contentWindow', 'contentDocument',
+  // `domain` is refused only on `document`: d3 scales set their range with `.domain(...)`.
+  const BLOCKED_PROPS = new Set(['location', 'opener', 'postMessage', 'cookie', 'contentWindow', 'contentDocument',
     'RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel']);
   const BLOCKED_NAMES = new Set(['location', 'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'importScripts', 'RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel']);
   function guard(node) {
     if (!node || typeof node.type !== 'string') return;
-    if (node.type === 'MemberExpression' && !node.computed && BLOCKED_PROPS.has(node.property.name))
+    if (node.type === 'MemberExpression' && !node.computed && (BLOCKED_PROPS.has(node.property.name) ||
+        (node.property.name === 'domain' && node.object.type === 'Identifier' && node.object.name === 'document')))
       throw new Error(`"${node.property.name}" is not available: figures can only draw.`);
     if (node.type === 'Identifier' && BLOCKED_NAMES.has(node.name) && node._ref)
       throw new Error(`"${node.name}" is not available: figures can only draw.`);
@@ -209,6 +211,17 @@
     }
   }
 
+  // The label halo (template.html) is in the board's colour: right for light text on the dark board, but around dark
+  // text (a label on a light bar) it is a dark smudge. Dark labels go without; a stroke the figure set itself stays.
+  function unhaloDark() {
+    for (const el of stage.querySelectorAll('svg text:not([stroke])')) {
+      if (el.style.stroke && !el.__paNoHalo) continue;
+      const c = (getComputedStyle(el).fill.match(/[\d.]+/g) || []).map(Number);
+      const dark = c.length >= 3 && (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255 < 0.45;
+      if (dark !== !!el.__paNoHalo) { el.style.stroke = dark ? 'none' : ''; el.__paNoHalo = dark; }
+    }
+  }
+
   // Voice-drawing sync: a piece waits until Hermes's voice has started the sentence it belongs to (at most `ms`,
   // so a slow or failed voice never freezes the drawing).
   async function voiceReaches(after, ms) {
@@ -261,7 +274,8 @@
         }
         safely(repairMath);
         safely(raiseLabels);
-        setTimeout(() => { safely(repairMath); safely(nudgeInside); safely(raiseLabels); }, 900);  // after its animations
+        safely(unhaloDark);
+        setTimeout(() => { safely(repairMath); safely(nudgeInside); safely(raiseLabels); safely(unhaloDark); }, 900);  // after its animations
         lay = safely(layoutCheck) || lay;  // labels that overlap or are cut off, so they get fixed in the next step
       } finally {
         post({ type: 'ran', n: piece.n, overlaps: (lay.overlaps || []).slice(0, 6), outside: (lay.outside || []).slice(0, 6) });
@@ -270,7 +284,7 @@
     busy = false;
   }
 
-  // Layout self-check: after every drawing step, and for canvas_look: visible things outside the stage, overlapping labels.
+  // Layout self-check: after every drawing step, and for vellum_look: visible things outside the stage, overlapping labels.
   function layoutCheck() {
     const R = stage.getBoundingClientRect();
     const visible = el => { for (let n = el; n && n !== stage; n = n.parentElement) { const cs = getComputedStyle(n); if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.05) return false; } return true; };

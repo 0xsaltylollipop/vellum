@@ -6,8 +6,8 @@ author: 0xsaltylollipop
 homepage: https://github.com/0xsaltylollipop/vellum
 license: MIT
 tags: [research, papers, visualization, desktop, education]
-requires_hermes: ">=0.22.6"
+requires_hermes: ">=0.22.7"
 platforms: []
-provides_tools: [canvas_draw, canvas_look, canvas_clear, paper_read]
+provides_tools: [vellum_draw, vellum_look, vellum_clear, vellum_read]
 provides_hooks: [pre_llm_call, pre_tool_call, on_stream_delta, on_stream_end, post_llm_call]
 requires_env: []

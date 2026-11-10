@@ -3,7 +3,8 @@ the agent half (Hermes's canvas tools and hooks) reads what it stores.
 
 GET  /runtime              the sandboxed figure runtime page (HTML) the card loads into its iframe
 POST /canvas/result        the paper's answer to a canvas tool request (draw / look / clear), relayed to the tool
-POST /paper                the open paper's full text, for paper_read and the hidden context
+POST /paper                the open paper's full text, for vellum_read and the hidden context
+POST /card                 a figure card the user opened with ✨ Visualize or 💬 Ask (only these start paper turns)
 POST /state                whether Vellum is on, and which card is LIVE (read by the hooks)
 POST /selection            the passage behind a 💬 Ask                         (read by the hooks)
 GET  /voice/{file}         one voiced sentence of Hermes's (data URL) for the card to play
@@ -69,6 +70,14 @@ async def voice(file: str):
     if not src:
         raise HTTPException(404, "no such sentence")
     return {"src": src}
+
+
+@router.post("/card")
+async def card(body: dict):
+    sessions = body.get("sessions") if isinstance(body.get("sessions"), list) else []
+    if not await asyncio.to_thread(canvas.save_card, str(body.get("id") or ""), str(body.get("url") or "")[:500], sessions):
+        raise HTTPException(400, "bad card")
+    return {"ok": True}
 
 
 @router.post("/state")

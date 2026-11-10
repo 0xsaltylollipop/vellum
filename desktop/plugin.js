@@ -391,7 +391,7 @@ function vellumInPage(secret) {
     return canvasCall(id, function () { var req = 'clr' + Math.random().toString(16).slice(2); return { key: req, msg: { type: 'clear', req: req } } }, 8000)
   }
 
-  // The whole paper as text (formulas as LaTeX), for Hermes's paper_read tool.
+  // The whole paper as text (formulas as LaTeX), for Hermes's vellum_read tool.
   function paperText() {
     var root = (document.querySelector('.ltx_page_main') || document.querySelector('article') || document.body).cloneNode(true)
     root.querySelectorAll('.pa-card, script, style, nav, .ltx_page_footer, .ltx_bibliography').forEach(function (e) { e.remove() })
@@ -647,8 +647,18 @@ export default {
       return { head: lead + ' this passage from the paper (' + paperUrl(sel) + ') on canvas `' + cardId + '`:', quote: lines.map(l => '> ' + l).join('\n') }
     }
 
+    // The chat a click belongs to (both of Desktop's ids for it; a brand-new chat may have none yet).
+    const chatIds = () => {
+      try { return [host.state.focusedStoredSessionId.get(), host.state.focusedSessionId.get()].filter(Boolean) } catch (err) { return [] }
+    }
+    // The card the user just opened is registered with our backend before its draft exists: the agent half starts a
+    // paper turn only for a registered card, never for a message that merely looks like one of our drafts.
+    const registerCard = (cardId, sel, sessions) =>
+      ctx.rest('/card', { method: 'POST', body: { id: cardId, url: paperUrl(sel), sessions }, timeoutMs: 10000 })
+
     const visualize = async (cardId, sel) => {
       try {
+        await registerCard(cardId, sel, chatIds())
         await ensureRuntime()
         await call('openFigure', cardId)
       } catch (err) {
@@ -665,9 +675,13 @@ export default {
     // 💬 Ask, Annotate-style: the passage goes into the Hermes chat as a draft; the user adds their question (typed or
     // dictated) and sends it. A question spoken in a voice conversation within two minutes is bound to it too.
     const askDraft = async (cardId, sel) => {
-      setLive(cardId)
       // The chat this Ask belongs to, so a question spoken in another chat is never bound to it.
-      const sessions = [host.state.focusedStoredSessionId.get(), host.state.focusedSessionId.get()].filter(Boolean)
+      const sessions = chatIds()
+      try { await registerCard(cardId, sel, sessions) } catch (err) {
+        host.notify({ kind: 'warning', message: 'Vellum could not reach Hermes: ' + errText(err) })
+        return
+      }
+      setLive(cardId)
       ctx.rest('/selection', { method: 'POST', body: { id: cardId, ask: true, sessions, ...sel, url: paperUrl(sel) }, timeoutMs: 10000 }).catch(() => {})
       try { await ensureRuntime(); await call('openFigure', cardId) } catch (err) { /* the figure opens on the first stroke anyway */ }
       const { head, quote } = draft('💬 Ask about', cardId, sel, 1500)

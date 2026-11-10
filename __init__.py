@@ -1,6 +1,6 @@
 """Vellum, agent half: Hermes's pen in the paper.
 
-Registers small canvas tools (draw a step, look at it, clear it) plus paper_read, the skill that teaches Hermes
+Registers small canvas tools (draw a step, look at it, clear it) plus vellum_read, the skill that teaches Hermes
 how to sketch the figure a passage should have had, and hooks that give our turns the paper quietly and a live
 voice (paper_anim/turns.py). The desktop half (desktop/plugin.js) hosts the canvas
 inside the paper and sends highlights and questions to the user's own Hermes session.
