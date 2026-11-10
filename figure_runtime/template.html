@@ -21,7 +21,7 @@
   .pen path { fill: none; stroke: #3D5AFE; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 120; animation: scribble 1.6s ease-in-out infinite; }
   @keyframes scribble { 0% { stroke-dashoffset: 120; } 50% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -120; } }
   #below { padding-top: 8px; }
-  #cap { min-height: 24px; font: 16px/1.5 -apple-system, system-ui, sans-serif; letter-spacing: .15px; color: #E4ECFF; transition: opacity .2s; padding: 2px 2px 6px; text-shadow: 0 0 8px rgba(94,234,255,.22); }
+  #cap { min-height: 72px; font: 16px/1.5 -apple-system, system-ui, sans-serif; letter-spacing: .15px; color: #E4ECFF; transition: opacity .2s; padding: 2px 2px 6px; text-shadow: 0 0 8px rgba(94,234,255,.22); }
   /* streamed caption: each letter lands as a turquoise glow, then settles */
   #cap .w { white-space: nowrap; }
   #cap .ch { display: inline-block; opacity: 0; animation: pa-ch .9s ease-out forwards; }
@@ -30,7 +30,10 @@
     35% { opacity: 1; filter: blur(0); transform: none; color: #BFF6FF; text-shadow: 0 0 8px #5EEAFF, 0 0 18px rgba(61,90,254,.8); }
     100% { opacity: 1; color: #E4ECFF; text-shadow: 0 0 8px rgba(94,234,255,.22); }
   }
-  @media (prefers-reduced-motion: reduce) { #cap .ch { animation: none; opacity: 1; } }
+  /* new marks fade in (runtime.js fadeIn); backwards fill only, so the figure's own opacity wins afterwards */
+  .pa-in { animation: pa-in .45s ease-out backwards; }
+  @keyframes pa-in { from { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { #cap .ch { animation: none; opacity: 1; } .pa-in { animation: none; } }
   /* knobs the figure adds: thin track, yellow handle (the key quantity's colour) */
   #stage input[type=range] { -webkit-appearance: none; appearance: none; height: 4px; background: #343a46; border-radius: 2px; outline: none; }
   #stage input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #FFD84D; box-shadow: 0 0 0 4px rgba(255,216,77,.18); cursor: grab; }

@@ -57,6 +57,17 @@ function vellumInPage(secret) {
   }
 
   // Selection -> text with formulas as LaTeX, plus where it sits in the paper.
+  // Whether the highlight covers any of el's text. A drag to the end of a paragraph often ends at offset 0 of the next
+  // one: that one is "touched" but has nothing selected, so it isn't part of the passage.
+  function hasSelectedText(range, el) {
+    if (!range.intersectsNode(el)) return false
+    var r = document.createRange()
+    r.selectNodeContents(el)
+    if (range.compareBoundaryPoints(Range.START_TO_START, r) > 0) r.setStart(range.startContainer, range.startOffset)
+    if (range.compareBoundaryPoints(Range.END_TO_END, r) < 0) r.setEnd(range.endContainer, range.endOffset)
+    return r.toString().trim().length > 0
+  }
+
   function capture() {
     var sel = window.getSelection()
     if (!sel || sel.isCollapsed || !sel.rangeCount) return null
@@ -70,7 +81,7 @@ function vellumInPage(secret) {
     var block = end.closest('.ltx_para') || end.closest('.ltx_equation, .ltx_equationgroup, figure, .ltx_theorem, li, p') || end
     // Every paragraph (and display equation) the highlight touches gets the yellow marker, not just the last one.
     var source = Array.prototype.filter.call(document.querySelectorAll('.ltx_para, .ltx_equation, .ltx_equationgroup'), function (el) {
-      return range.intersectsNode(el) && !el.parentElement.closest('.ltx_para')
+      return hasSelectedText(range, el) && !el.parentElement.closest('.ltx_para')
     }).slice(0, 30)
     if (!source.length) source = [block]
     var docTitle = document.querySelector('.ltx_title_document')

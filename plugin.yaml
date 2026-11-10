@@ -1,5 +1,5 @@
 name: vellum
-version: "0.4.0"
+version: "0.4.1"
 manifest_version: 2
 description: "Vellum: Hermes draws inside the paper. Highlight a passage in an arXiv paper in Hermes's browser and your own Hermes explains it out loud while drawing a live figure right under it. Ask more and it keeps building on the same figure."
 author: 0xsaltylollipop

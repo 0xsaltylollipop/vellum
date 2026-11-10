@@ -222,6 +222,19 @@
     }
   }
 
+  // New marks fade in softly instead of popping up, unless the figure animates them itself (a d3 transition, or an
+  // opacity of its own). Only the outermost new node of a step gets it, and only once: the class goes when the fade
+  // ends, so moving the node later (raiseLabels, a regroup) doesn't fade it again.
+  function fadeIn(added, before) {
+    const fresh = new Set(added.filter(n => n.isConnected && !before.has(n)));
+    for (const el of fresh) {
+      if (fresh.has(el.parentNode) || el.closest('defs') || el.__transition || el.hasAttribute('opacity') || el.style.opacity) continue;
+      if ([...el.querySelectorAll('*')].some(d => before.has(d))) continue;  // holds earlier marks (a regroup): they stay put
+      el.classList.add('pa-in');
+      el.addEventListener('animationend', () => el.classList.remove('pa-in'), { once: true });
+    }
+  }
+
   // Voice-drawing sync: a piece waits until Hermes's voice has started the sentence it belongs to (at most `ms`,
   // so a slow or failed voice never freezes the drawing).
   async function voiceReaches(after, ms) {
@@ -242,7 +255,13 @@
       let lay = { overlaps: [], outside: [] };
       try {
         if (piece.after) await voiceReaches(piece.after, 10000);  // shown when Hermes starts talking about it
-        document.getElementById('thinking')?.remove();
+        const thinking = document.getElementById('thinking');
+        if (thinking && !thinking.dataset.going) {
+          thinking.dataset.going = '1';
+          thinking.style.transition = 'opacity .35s ease';
+          thinking.style.opacity = '0';
+          setTimeout(() => thinking.remove(), 360);
+        }
         const before = new Set(stage.querySelectorAll('*'));
         const added = [];
         const watch = new MutationObserver(rs => rs.forEach(r => r.addedNodes.forEach(n => { if (n.nodeType === 1) added.push(n); })));
@@ -275,6 +294,7 @@
         safely(repairMath);
         safely(raiseLabels);
         safely(unhaloDark);
+        if (!error) safely(() => fadeIn(added, before));
         setTimeout(() => { safely(repairMath); safely(nudgeInside); safely(raiseLabels); safely(unhaloDark); }, 900);  // after its animations
         lay = safely(layoutCheck) || lay;  // labels that overlap or are cut off, so they get fixed in the next step
       } finally {
