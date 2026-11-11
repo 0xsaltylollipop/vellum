@@ -8,22 +8,38 @@ Highlight a passage in an arXiv paper in Hermes Desktop. Your own Hermes explain
 
 Available in the [Hermes Marketplace](https://hermes-agent.nousresearch.com/marketplace/vellum).
 
-## Install
+## Quick start
+
+**1. Install** (once)
 
 ```bash
 hermes plugins install vellum --enable
 ```
 
-Restart Hermes Desktop, then turn on the Desktop half in Capabilities → Plugins → Vellum. Needs Hermes Desktop 0.22.7 or newer.
+Installing by name needs Hermes 0.23.1 or newer. On 0.22.7 to 0.23.0, install from GitHub instead:
 
-## Use
+```bash
+hermes plugins install 0xsaltylollipop/vellum --enable
+```
 
-1. Open an arXiv paper's HTML version in Hermes's browser (`arxiv.org/html/…`, or `ar5iv.labs.arxiv.org/html/…` for older papers), with a chat next to it.
-2. Click **✨ Vellum** in the status bar. Desktop asks once per site. If the page changes (another paper, a reload), Vellum pauses; click ✨ Vellum again to turn it on there.
-3. Highlight a passage and click **Visualize**, or **Ask** to add your own question. The request lands in your chat box as a draft; press Enter to send.
-4. Keep asking and the figure keeps changing. Click **LIVE** on the figure to go back to normal chat, **Resume** to return.
+Restart Hermes Desktop, then switch Vellum on in **Capabilities → Plugins**. Vellum runs on Hermes Desktop 0.22.7 or newer.
 
-Vellum never sends a message for you. Leave Desktop's "Read replies aloud" off: Vellum voices replies itself, in step with the drawing.
+**2. Try it**
+
+1. Open your favorite paper on arXiv in Hermes's browser, using its HTML version (`arxiv.org/html/…`). Or just ask Hermes to open it.
+2. Click **✨ Vellum** in the status bar at the bottom, and allow arxiv.org when asked.
+3. Highlight a passage you want explained and click **✨ Visualize**.
+4. Press **Enter** in the chat. Hermes starts explaining out loud and drawing under the passage.
+5. Ask follow-ups, typed or out loud. The same figure keeps evolving.
+
+## Good to know
+
+- **Ask** instead of Visualize puts the passage in your chat box, so you can add your own question.
+- **LIVE** on the figure takes you back to normal chat; **Resume** brings Vellum back.
+- Turn off Desktop's **"Read replies aloud"**: Vellum speaks for itself, in sync with the drawing.
+- Works on arXiv HTML pages (`arxiv.org/html/…`), and on `ar5iv.labs.arxiv.org/html/…` for papers arXiv hasn't converted.
+- After a reload or a new paper, Vellum pauses. Click ✨ Vellum again.
+- Vellum never sends a message for you. You always press Enter.
 
 ## How it works
 
