@@ -1,12 +1,12 @@
 # Vellum
 
-Hermes draws inside the paper.
+**Papers are frozen. Your Hermes can now bring them to life.**
 
-![Vellum: highlight a passage, click Visualize, and Hermes draws a live figure under it](https://raw.githubusercontent.com/0xsaltylollipop/vellum/media/demo.gif)
+![Highlight a passage, click Visualize, and Hermes draws a live figure under it](https://raw.githubusercontent.com/0xsaltylollipop/vellum/media/demo.gif)
 
-Highlight a passage in an arXiv paper in Hermes Desktop. Your own Hermes explains it out loud and draws a live figure right under the paragraph, each piece appearing as its sentence is spoken. Ask follow-ups, typed or spoken, and the same figure evolves. Nothing is pre-built: every figure is written live by your model.
+Highlight any passage of an arXiv paper in Hermes Desktop, and Hermes explains it out loud while drawing a live figure right inside the page. Ask follow-ups and the figure evolves. Nothing is pre-built. Every figure is written live by your model.
 
-Available in the [Hermes Marketplace](https://hermes-agent.nousresearch.com/marketplace/vellum).
+A new medium for Hermes, available in the [Hermes Marketplace](https://hermes-agent.nousresearch.com/marketplace/vellum).
 
 ## Quick start
 
