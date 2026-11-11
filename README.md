@@ -1,70 +1,73 @@
-# Vellum: Hermes draws inside the paper
+# Vellum
 
-**Your agent, with the whole paper in its head, drawing a live figure you can touch.**
+Hermes draws inside the paper.
 
-*Vellum is the parchment medieval scribes illuminated: they drew living pictures right into the text to explain it. This plugin gives Hermes that pen.*
+![Vellum: highlight a passage, click Visualize, and Hermes draws a live figure under it](docs/demo.gif)
 
-Highlight a passage in an arXiv paper in Hermes's browser. Your own Hermes session gives you the gist like a smart friend at a whiteboard: it talks you through the core idea while it sketches a live, interactive figure right under the paragraph, built from the paper's own example and numbers. Ask a follow-up (typed or out loud) and it keeps drawing on the same sketch.
+Highlight a passage in an arXiv paper in Hermes Desktop. Your own Hermes explains it out loud and draws a live figure right under the paragraph, each piece appearing as its sentence is spoken. Ask follow-ups, typed or spoken, and the same figure evolves. Nothing is pre-built: every figure is written live by your model.
 
-It is not a video generator and not a separate app: it gives Hermes a new ability, **a canvas inside what you're reading**, plus a voice that stays in sync with the drawing.
+Available in the [Hermes Marketplace](https://hermes-agent.nousresearch.com/marketplace/vellum).
 
-## Try it
-1. Install it with `hermes plugins install vellum --enable`, restart Hermes Desktop so Hermes loads it, then turn on its Desktop half (Capabilities → Plugins → Vellum → On). Needs Hermes Desktop 0.22.7 or newer.
-2. Open an arXiv paper's HTML version in Hermes's browser (`arxiv.org/html/…`, or `ar5iv.labs.arxiv.org/html/…` for papers arXiv itself hasn't converted), with a Hermes chat next to it.
-3. Click **✨ Vellum** in the status bar (Desktop asks once to let it run on arxiv.org, and once more for ar5iv). Desktop asks for each site, so clicking it on any other page asks about that site: say no there. Vellum only works on arXiv HTML papers. When the page changes (another paper, a reload) it pauses; click ✨ Vellum again to turn it on there.
-4. Highlight a passage, then:
-   - **✨ Visualize**: the request lands in your Hermes chat box as a draft; press Enter and Hermes explains it and draws.
-   - **💬 Ask**: the passage lands in your Hermes chat box as a draft; add your question (type or dictate) and send. In a Hermes voice conversation you can also just say it.
+## Install
 
-   Vellum never sends a chat message for you: every turn starts with you pressing Enter (or speaking).
-5. Keep asking in the chat or out loud; Hermes answers and changes the same figure.
-6. Click **LIVE** on the figure to leave: Hermes chats normally again, without voice or drawing. **Resume** brings it back.
+```bash
+hermes plugins install vellum --enable
+```
 
-Leave Hermes Desktop's "Read replies aloud" off: the plugin speaks Hermes's replies itself, sentence by sentence, in sync with the drawing.
+Restart Hermes Desktop, then turn on the Desktop half in Capabilities → Plugins → Vellum. Needs Hermes Desktop 0.22.7 or newer.
+
+## Use
+
+1. Open an arXiv paper's HTML version in Hermes's browser (`arxiv.org/html/…`, or `ar5iv.labs.arxiv.org/html/…` for older papers), with a chat next to it.
+2. Click **✨ Vellum** in the status bar. Desktop asks once per site.
+3. Highlight a passage and click **Visualize**, or **Ask** to add your own question. The request lands in your chat box as a draft; press Enter to send.
+4. Keep asking and the figure keeps changing. Click **LIVE** on the figure to go back to normal chat, **Resume** to return.
+
+Vellum never sends a message for you. Leave Desktop's "Read replies aloud" off: Vellum voices replies itself, in step with the drawing.
 
 ## How it works
-Everything runs in your own Hermes session, with your model and your settings. The plugin adds:
 
 | Piece | What it does |
 |---|---|
-| `vellum_draw(canvas, say, code)` | One step of the figure: `code` is a small piece of JavaScript drawn on the canvas under the paragraph (D3 and KaTeX available; names persist across calls like notebook cells), and `say` is what Hermes says as that piece appears. |
-| `vellum_look(canvas)` | A picture of the canvas plus a layout report, for when Hermes is unsure how its figure looks. Every drawing step also reports overlapping or cut-off labels. |
-| `vellum_clear(canvas)` | Start over (the old drawing fades away). |
-| `vellum_read(url, offset)` | The paper's full text (formulas as LaTeX, tables as plain text), in chunks, marked as web text. |
-| Hooks on Hermes's turns | Hermes calls them on every turn; they do their work on **paper turns**. On other turns they only refuse the figure tools and, once, tell Hermes that the user left the paper. A paper turn is a ✨ Visualize / 💬 Ask message for a figure card you opened with a click in Desktop (a message that only looks like one is an ordinary message, and a card belongs to the chat that sends it first), a question spoken right after 💬 Ask in the same chat, or a follow-up in the chat that owns the **LIVE** figure; only interactive local chats qualify (Desktop, or Hermes's own terminal and web chat; never cron, messaging platforms, subagents or a turn that names no platform), and only while the plugin is on. On a paper turn they add the skill and the paper around the passage to the model's input for that message (not shown in the chat), voice Hermes's text sentence by sentence and each step's `say` with Hermes's `text_to_speech`, and show each drawing step as its sentence starts. Outside a paper turn the figure tools are refused, and inside one they work on that turn's figure only. |
-| A skill (`vellum:paper-canvas`) | The guidance itself: find the passage's key idea in the context of the paper, give the gist and the why, and build one concrete example on the board. Edit `skills/paper-canvas/SKILL.md` to change the style. |
+| `vellum_draw(canvas, say, code)` | One drawing step. `code` is JavaScript run in the figure (D3 and KaTeX available, names persist like notebook cells); `say` is spoken as it appears. |
+| `vellum_look(canvas)` | A picture of the figure plus a layout report. |
+| `vellum_clear(canvas)` | Start over. |
+| `vellum_read(url, offset)` | The paper's full text in chunks, marked as web text. |
+| Hooks | `pre_llm_call` adds the skill and the paper around the passage. `pre_tool_call` voices each step and holds it until its sentence plays. `on_stream_delta`, `on_stream_end` and `post_llm_call` voice the reply sentence by sentence with Hermes's `text_to_speech`. |
+| Skill `vellum:paper-canvas` | The teaching style: the gist, one concrete example, why it matters. Edit `skills/paper-canvas/SKILL.md` to change it. |
+| Desktop half | The status-bar chip, the in-page buttons and the figure card. |
 
-## Why a plugin and not a prompt
-A prompt can ask a model to explain a passage. It can't do the rest:
-- **Draw inside the page you're reading.** That takes the Desktop half (the card under the paragraph) and the canvas tools.
-- **Keep the drawing in step with the voice.** The hooks on Hermes's stream voice each sentence as it is written, and each drawing step is held back until its sentence starts playing.
-- **Know the paper, on the right turns only.** `pre_llm_call` hands the model the paper around the passage on paper turns and stays out of every other chat.
-- **Run model-written code safely.** The figure runs in a sandboxed frame that can't reach the page or your session and can't make requests; the two gaps the sandbox doesn't cover are listed under Security model.
+All of this happens only on **paper turns**: a message started from a Visualize or Ask click (or a follow-up in the chat that owns the LIVE figure), in an interactive local chat, while the plugin is on. On any other turn the hooks do nothing and the figure tools refuse.
 
-The skill is the one part that is a prompt, and you can edit it.
+Why a plugin and not a prompt: drawing inside the page needs the Desktop half, keeping voice and drawing in sync needs the stream hooks, and running model-written code safely needs a sandbox.
 
-## Security model
-- **The drawing code** is written by your own model and runs only inside a sandboxed iframe in the card (`sandbox="allow-scripts"`, opaque origin, CSP `default-src 'none'` with the page's two scripts listed by hash). It has no access to the paper page, Hermes, your chat, your files or cookies; it can't make requests or load anything through the browser's normal routes (fetch, images, scripts, frames), open windows or submit forms; it can only draw and report back to the waiting tool (done, an error, layout warnings, or a picture for `vellum_look`, all bounded in size). Two things the sandbox and the CSP don't govern are handled as best effort:
-  - **WebRTC.** Its constructors are removed from the figure's window. A frame created inside the figure would get fresh ones, but it inherits the CSP, and since that lists scripts by hash, such a frame can't run a script of its own to use them. (A side effect: inline handler attributes like `onclick="…"` don't run in figures; `addEventListener` and D3's `.on()` do.)
-  - **A frame navigating itself.** Nothing in CSP prevents it, so the card removes a figure that navigates away.
+## Security
 
-  Two more checks exist for the model's benefit, not as boundaries. Code that names `location`, `fetch` and similar is refused before it runs, so the model gets a clear error to fix; a computed name gets past it. And loops that keep the page busy for more than 3 s are stopped, so a runaway loop doesn't freeze the figure; deep recursion or one huge built-in call isn't covered. A model that has been talked into leaking data could still try; it would have Hermes's own web tools for that too, so the sandbox adds no new reach.
-- **Paper text is untrusted.** The highlighted passage and the paper text around it are web content; the plugin labels both for the model as reference material whose instructions must never be followed, and text in them shaped like the plugin's own notes to the model loses that shape before it is added. Hidden prompt-injection text in a paper is still a risk any agent reading the web has.
-- **You send every message.** A click on Visualize or Ask only puts a draft into your Hermes chat box; the plugin never submits a chat turn, so nothing in a web page can start one. Visualize, Ask, LIVE and close ignore clicks that a page script fakes. The in-page script is a frozen, read-only object that answers only calls carrying a secret the plugin makes at each install and never stores on the page. Every event from the page is checked (an arXiv paper's address, a card id, bounded text) before anything is put into your chat box, the card is registered with the plugin's backend before its draft exists (only registered cards start paper turns, so typing or pasting a lookalike draft does nothing special), and a draft's first line holds only that checked address and the card id: the paper's title and section name are page text, so they go into the quote with the passage. This is best effort against scripts that arxiv.org itself serves: a script running in the same page can't be fully kept out of what the in-page script sees, which is why the checks sit on the plugin's side and every message waits for you to send it.
-- **Other chats are left alone.** Cron, messaging platforms and subagents never get paper turns, a figure belongs to the chat it was made in, a turn can change only its own figure, and the figure tools are refused outside paper turns and fail at once when no Desktop paper is on.
+- **Figure code** is written by your model and runs only in a sandboxed iframe (`sandbox="allow-scripts"`, opaque origin, CSP `default-src 'none'` with the page's scripts pinned by hash). It can't reach the paper page, your session, your files or the network. Two gaps the sandbox doesn't cover are handled best effort: WebRTC constructors are removed, and a figure that navigates away is removed.
+- **Paper text is untrusted.** The passage and the text around it are labelled for the model as web content whose instructions must not be followed.
+- **You send every message.** Clicks only create a draft. Page events are checked, and a figure card is registered with the backend before its draft exists, so a lookalike message typed by hand does nothing special.
+- **Other chats are left alone.** Cron, messaging platforms and subagents never get paper turns, and a figure belongs to the chat it was made in.
 
-## What it touches (disclosure)
-- **The paper page:** reads the page you're on (arXiv HTML pages only: arxiv.org/html and ar5iv) with Desktop's per-site consent, adds the buttons, the figure card under the paragraph, a style sheet and its in-page script. The paper's own text is not changed. When you switch the chip on, it saves the whole paper's text for Hermes (see Stored data).
-- **Your Hermes session:** puts ✨ Visualize / 💬 Ask drafts into the chat box of the chat you have open, for you to send; adds paper context to the model's input on those turns (not shown in the chat).
-- **Your model:** whatever Hermes is configured to use. The passage and nearby paper text go to it as part of the turn.
-- **Voice:** Hermes's own `text_to_speech` with your configured provider, one call per spoken sentence, at most 60 per turn; further sentences are shown as captions (Edge TTS by default, a free online Microsoft service; a paid provider bills each sentence).
-- **Stored data:** in the plugin's data folder of your active Hermes profile (`<HERMES_HOME>/plugin-data/vellum/`, usually `~/.hermes/…`): the text of the 20 most recently opened papers, the ids of the 50 most recent figure cards you opened (with the paper and the chat they were opened in), the current Ask, whether the plugin is on and which figure is LIVE (re-confirmed every ~20 s while Desktop runs), and short-lived files (voiced sentences, removed after about a day; tool answers, after about an hour; cleaned up during use). No telemetry.
-- **Plumbing:** the Desktop half talks to the plugin's own backend routes under `/api/plugins/vellum/` (the figure page, card registration, tool results, the paper text, on/LIVE state, the Ask passage, voice clips), and the tools reach the card through Hermes's plugin events (`plugin.vellum.*`). The figure frame's CSP allows `'unsafe-eval'`: each drawing step is model-written JavaScript run inside that sandbox.
-- **When the paper isn't open** (Desktop closed or crashed, the chip off, cron or messaging runs): the canvas tools fail at once with a short message and the hooks do nothing.
-- No credentials, no external CLIs, no downloads, no binaries.
+## What it touches
 
-## Reliability
-In testing with Claude Opus on *Attention Is All You Need* and other arXiv papers: the first spoken sentence comes about 8–15 s after you send the draft, a full explanation with three drawing steps takes about a minute, and a spoken follow-up redraws the figure in about the same time. Voice is synthesised a few sentences at a time, so it keeps pace with the drawing; a sentence that can't be voiced is shown as a caption instead.
+- **Pages:** arXiv HTML pages only (arxiv.org/html and ar5iv), with Desktop's per-site consent. It adds the buttons, the figure card, a style sheet and its in-page script; the paper's text is not changed.
+- **Your model:** the passage and nearby paper text go to whatever model Hermes uses.
+- **Voice:** Hermes's own `text_to_speech` with your configured provider (Edge TTS by default), one call per spoken sentence, at most 60 per turn.
+- **Stored data** in `<HERMES_HOME>/plugin-data/vellum/`: the text of the 20 most recent papers, the 50 most recent figure card ids, the current Ask, the on/LIVE state, voice clips (about a day) and tool answers (about an hour).
+- **Plumbing:** backend routes under `/api/plugins/vellum/` and plugin events `plugin.vellum.*`. The figure frame's CSP allows `'unsafe-eval'` because each drawing step is model-written JavaScript run inside the sandbox.
+- No telemetry, no credentials, no external CLIs, no downloads, no compiled binaries.
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `__init__.py`, `paper_anim/` | Agent half: tool registration, `canvas.py` (the figure tools), `turns.py` (paper turns and voice hooks). |
+| `dashboard/` | Backend routes the Desktop half talks to. |
+| `desktop/plugin.js` | Desktop half: chip, in-page buttons, figure card. |
+| `figure_runtime/` | The sandboxed figure page and its runtime, plus vendored D3, KaTeX and acorn. |
+| `skills/paper-canvas/SKILL.md` | The teaching guidance. |
+| `tests/` | Run with `uvx --with fastapi pytest -q tests`. |
 
 ## License
+
 MIT (see `LICENSE`). Vendored, unmodified, in `figure_runtime/vendor/`: D3 7.9.2 (ISC), KaTeX 0.16.47 (MIT, with its fonts), acorn 8.19.0 (MIT).
