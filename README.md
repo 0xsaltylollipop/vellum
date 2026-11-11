@@ -2,7 +2,7 @@
 
 Hermes draws inside the paper.
 
-![Vellum: highlight a passage, click Visualize, and Hermes draws a live figure under it](https://raw.githubusercontent.com/0xsaltylollipop/vellum/media/demo.gif)
+![Vellum: highlight a passage, click Visualize, and Hermes draws a live figure under it](https://raw.githubusercontent.com/0xsaltylollipop/vellum/media/demo.webp)
 
 Highlight a passage in an arXiv paper in Hermes Desktop. Your own Hermes explains it out loud and draws a live figure right under the paragraph, each piece appearing as its sentence is spoken. Ask follow-ups, typed or spoken, and the same figure evolves. Nothing is pre-built: every figure is written live by your model.
 
