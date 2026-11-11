@@ -34,6 +34,7 @@ Restart Hermes Desktop, then switch Vellum on in **Capabilities → Plugins**. V
 
 ## Good to know
 
+- Tested with **Claude Opus 5.5** at low reasoning effort. Smaller models can draw simpler figures.
 - **Ask** instead of Visualize puts the passage in your chat box, so you can add your own question.
 - **LIVE** on the figure takes you back to normal chat; **Resume** brings Vellum back.
 - Turn off Desktop's **"Read replies aloud"**: Vellum speaks for itself, in sync with the drawing.
