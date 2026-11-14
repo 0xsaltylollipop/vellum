@@ -617,6 +617,18 @@ const toDataUrl = html => {
   return 'data:text/html;base64,' + btoa(s)
 }
 
+// Status-bar switch for where figures draw, so the mode never depends on finding the pane first.
+function PaneChip({ toggle }) {
+  const on = useValue($paneMode)
+  return jsx('button', {
+    type: 'button',
+    onClick: toggle,
+    title: on ? 'Figures draw in the Vellum pane. Click to draw inside the paper again.' : 'Figures draw inside the paper. Click to draw them in the Vellum pane.',
+    className: 'px-1.5 text-[0.6875rem] ' + (on ? 'text-(--ui-text-primary)' : 'text-(--ui-text-tertiary)'),
+    children: on ? '◧ Figures: pane' : '◧ Figures: paper'
+  })
+}
+
 function PaneView({ onToggle, onFrame, onLoad }) {
   const mode = useValue($paneMode)
   const src = useValue($paneSrc)
@@ -680,7 +692,15 @@ export default {
     // ---- The Vellum pane (prototype): the same figure protocol as the in-page card, with the frame in Desktop ----
     const pane = { canvas: '', frame: null, ready: false, outbox: [], waits: {}, n: 0, loads: 0 }
     $paneMode.set(!!ctx.storage.get('paneMode', false))
-    const togglePane = () => { const on = !$paneMode.get(); $paneMode.set(on); ctx.storage.set('paneMode', on) }
+    // A contributed pane joins its zone silently (behind the active tab), so show it on an explicit user action:
+    // switching pane mode on, or a Visualize/Ask click while it is on. Pane ids are `<pluginId>:<paneId>`.
+    const showPane = () => { try { if (typeof host.revealPane === 'function') host.revealPane('vellum:pane') } catch (err) { /* older Desktop */ } }
+    const togglePane = () => {
+      const on = !$paneMode.get()
+      $paneMode.set(on)
+      ctx.storage.set('paneMode', on)
+      if (on) showPane()
+    }
     const failPane = error => {
       Object.keys(pane.waits).forEach(k => { const w = pane.waits[k]; delete pane.waits[k]; w.done({ ok: false, error }) })
       pane.ready = false
@@ -705,6 +725,7 @@ export default {
       $paneStatus.set('Ready: press Enter in your Hermes chat')
       $paneKey.set($paneKey.get() + 1)
       $paneSrc.set(toDataUrl(runtime))
+      showPane()
     }
     const paneCall = (make, timeoutMs) => {
       if (!pane.canvas || !$paneSrc.get()) return Promise.resolve({ ok: false, error: 'The Vellum pane has no figure open.' })
@@ -966,6 +987,12 @@ export default {
       area: STATUSBAR_AREAS.right,
       order: 125,
       render: () => jsx(Chip, { toggle: () => ($armed.get() ? stop() : start()) })
+    })
+    ctx.register({
+      id: 'pane-chip',
+      area: STATUSBAR_AREAS.right,
+      order: 126,
+      render: () => jsx(PaneChip, { toggle: togglePane })
     })
     ctx.register({
       id: 'pane',
