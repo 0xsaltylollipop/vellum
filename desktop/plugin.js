@@ -927,8 +927,11 @@ export default {
     host.onEvent('plugin.vellum.turn', ({ payload }) => {
       const p = payload || {}
       if (!p.canvas || !CARD.test(String(p.canvas))) return
-      if (figure.owns(p.canvas)) figure.status('Hermes is looking at it…')
-      else if ($armed.get()) call('setStatus', p.canvas, 'Hermes is looking at it…').catch(() => {})
+      if (figure.owns(p.canvas)) {
+        figure.status('Hermes is looking at it…')
+        // A paper figure drawn in the pane still has its card under the passage: point it at the pane.
+        if ($armed.get()) call('setStatus', p.canvas, 'Hermes is drawing this in the Vellum pane →').catch(() => {})
+      } else if ($armed.get()) call('setStatus', p.canvas, 'Hermes is looking at it…').catch(() => {})
     })
     // Hermes's voice for our turns: each sentence is voiced as it streams (paper_anim/turns.py) and played in the card.
     host.onEvent('plugin.vellum.voice', async ({ payload }) => {
