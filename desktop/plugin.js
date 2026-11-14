@@ -629,24 +629,32 @@ function PaneChip({ toggle }) {
   })
 }
 
-function PaneView({ onToggle, onFrame, onLoad }) {
+const $paneMarked = atom(false) // the open figure is for a marked region (🖍), not a passage in the paper
+
+function PaneView({ onToggle, onFrame, onLoad, onMarked, onStop }) {
   const mode = useValue($paneMode)
   const src = useValue($paneSrc)
   const k = useValue($paneKey)
   const height = useValue($paneHeight)
   const status = useValue($paneStatus)
+  const marked = useValue($paneMarked)
+  const button = (label, onClick, title) => jsx('button', {
+    type: 'button',
+    onClick,
+    title,
+    style: { padding: '2px 8px', borderRadius: '4px', border: '1px solid rgba(127,127,160,.4)', background: 'transparent', color: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap' },
+    children: label
+  })
   const header = jsxs('div', {
-    style: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px', fontSize: '12px' },
+    style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', fontSize: '12px', flexWrap: 'wrap' },
     children: [
       jsx('span', { style: { fontWeight: 600, letterSpacing: '.08em' }, children: 'VELLUM CANVAS' }),
-      jsx('span', { style: { flex: 1, opacity: 0.7 }, children: status }),
-      jsx('button', {
-        type: 'button',
-        onClick: onToggle,
-        title: mode ? 'Figures draw in this pane. Click to draw in the paper again.' : 'Draw figures in this pane instead of the paper',
-        style: { padding: '2px 8px', borderRadius: '4px', border: '1px solid rgba(127,127,160,.4)', background: 'transparent', color: 'inherit', cursor: 'pointer' },
-        children: mode ? 'Drawing here: on' : 'Drawing here: off'
-      })
+      jsx('span', { style: { flex: 1, opacity: 0.7, minWidth: '80px' }, children: status }),
+      button('🖍 New figure from a marked region', onMarked,
+        'Start a figure here, then mark part of any page or PDF with the annotate tool and send it'),
+      marked ? button('Stop', onStop, 'Stop drawing in this pane: Hermes chats normally again') : null,
+      button(mode ? 'Paper figures: here' : 'Paper figures: in the paper', onToggle,
+        mode ? 'Visualize / Ask figures draw in this pane. Click to draw them in the paper again.' : 'Draw Visualize / Ask figures in this pane instead of the paper')
     ]
   })
   const body = src
@@ -660,9 +668,8 @@ function PaneView({ onToggle, onFrame, onLoad }) {
       })
     : jsx('div', {
         style: { opacity: 0.6, fontSize: '13px', lineHeight: 1.5, padding: '24px 4px' },
-        children: mode
-          ? 'Highlight a passage in the paper and click Visualize: the figure draws here while Hermes talks.'
-          : 'Turn on "Drawing here" to draw figures in this pane instead of inside the paper.'
+        children: '🖍 New figure from a marked region, then mark part of any page or PDF with the annotate tool and send: '
+          + 'Hermes explains it out loud and draws it here.' + (mode ? ' Visualize / Ask in an arXiv paper also draws here.' : '')
       })
   return jsxs('div', { style: { height: '100%', overflow: 'auto', padding: '12px' }, children: [header, body] })
 }
@@ -682,7 +689,8 @@ export default {
     const page = code => ctx.preview.executeJavaScript(code)
     const call = (fn, ...args) => page(callCode(key, fn, args, 'null'))
     const install = () => { key = newKey(); return page(installCode(key)) }
-    const postState = () => ctx.rest('/state', { method: 'POST', body: { armed: $armed.get(), live: liveCard }, timeoutMs: 10000 }).catch(() => {})
+    // "On" for the hooks: Vellum is on in a paper, or a 🖍 marked-region figure is open in the pane (which needs no page).
+    const postState = () => ctx.rest('/state', { method: 'POST', body: { armed: $armed.get() || $paneMarked.get(), live: liveCard }, timeoutMs: 10000 }).catch(() => {})
 
     async function ensureRuntime() {
       if (!runtime) runtime = (await ctx.rest('/runtime', { timeoutMs: 30000 })).html
@@ -719,6 +727,7 @@ export default {
     const onPaneFrame = el => { pane.frame = el || null }
     const paneOpen = async cardId => {
       failPane('A new figure was opened.')
+      $paneMarked.set(false)
       Object.assign(pane, { canvas: cardId, frame: null, ready: false, outbox: [], waits: {}, n: 0, loads: 0 })
       if (!runtime) runtime = (await ctx.rest('/runtime', { timeoutMs: 30000 })).html
       $paneHeight.set(560)
@@ -771,6 +780,34 @@ export default {
         l.done(m.type === 'look' ? { ok: true, layout: m.result, png: m.png, error: m.error ? String(m.error).slice(0, 600) : undefined } : { ok: true })
       }
     })
+
+    // 🖍 A figure for a marked region: registered (only registered cards start paper turns), opened in the pane, and a
+    // one-line draft put in the chat box. The user then marks part of the page or PDF with Hermes Desktop's annotate
+    // tool, which adds the pictures to the same message, and sends it. Nothing runs in the page itself.
+    const newMarked = async () => {
+      const cardId = 'pa-' + random(2)
+      try {
+        await ctx.rest('/card', { method: 'POST', body: { id: cardId, kind: 'marked', sessions: chatIds() }, timeoutMs: 10000 })
+        await paneOpen(cardId)
+      } catch (err) {
+        host.notify({ kind: 'warning', message: 'Vellum could not start a figure: ' + errText(err) })
+        return
+      }
+      $paneMarked.set(true)
+      liveCard = cardId // follow-ups in this chat keep drawing here; the pane's Stop ends that
+      postState()
+      const ok = await toDraft('🖍 Visualize what I marked on canvas `' + cardId + '`:\n')
+      $paneStatus.set(ok ? 'Now mark part of the page with the annotate tool, then send' : 'Open a Hermes chat first')
+    }
+    const stopMarked = () => {
+      failPane('Stopped.')
+      $paneMarked.set(false)
+      if (liveCard === pane.canvas) liveCard = ''
+      postState()
+      $paneStatus.set('Stopped: Hermes chats normally again')
+    }
+    // Keep "on" fresh for the hooks while a marked-region figure is open (the paper loop does this for paper figures).
+    ctx.setInterval(() => { if ($paneMarked.get()) postState() }, 15000)
 
     // The paper's full text goes to the backend once per page. On the first highlight our hook hands it (and the
     // drawing skill) to Hermes quietly, inside that turn: nothing extra appears in the chat (paper_anim/turns.py).
@@ -864,13 +901,14 @@ export default {
     const onCanvas = (fn, timeoutMs) => async ({ payload }) => {
       const p = payload || {}
       // Off in this window: stay quiet (another window may have the paper; the tool fails fast when none is on).
-      if (!p.req || !$armed.get()) return
-      // This figure lives in the Vellum pane: run the step there.
-      if ($paneMode.get() && p.canvas && p.canvas === pane.canvas) {
+      if (!p.req) return
+      // This figure lives in the Vellum pane (a paper figure in pane mode, or a 🖍 marked region): run the step there.
+      if (p.canvas && p.canvas === pane.canvas && $paneSrc.get()) {
         const run = fn === 'runStep' ? paneRunStep(p.code, p.after) : fn === 'lookAt' ? paneLook() : paneClear()
         answer(p.req, await run.catch(err => ({ ok: false, error: errText(err) })))
         return
       }
+      if (!$armed.get()) return
       try {
         // Not this window's card: let the window that has it answer (its piece may wait ~10 s for the voice);
         // only then report "no such canvas", for the case where the card is really gone.
@@ -891,15 +929,16 @@ export default {
     // The user sent the draft and Hermes started on it (paper_anim/turns.py): say so on the card.
     host.onEvent('plugin.vellum.turn', ({ payload }) => {
       const p = payload || {}
-      if (!p.canvas || !$armed.get() || !CARD.test(String(p.canvas))) return
-      if ($paneMode.get() && p.canvas === pane.canvas) $paneStatus.set('Hermes is looking at it…')
-      else call('setStatus', p.canvas, 'Hermes is looking at it…').catch(() => {})
+      if (!p.canvas || !CARD.test(String(p.canvas))) return
+      if (p.canvas === pane.canvas && $paneSrc.get()) $paneStatus.set('Hermes is looking at it…')
+      else if ($armed.get()) call('setStatus', p.canvas, 'Hermes is looking at it…').catch(() => {})
     })
     // Hermes's voice for our turns: each sentence is voiced as it streams (paper_anim/turns.py) and played in the card.
     host.onEvent('plugin.vellum.voice', async ({ payload }) => {
       const p = payload || {}
-      if (!p.canvas || !$armed.get() || !CARD.test(String(p.canvas))) return
-      const inPane = $paneMode.get() && p.canvas === pane.canvas
+      if (!p.canvas || !CARD.test(String(p.canvas))) return
+      const inPane = p.canvas === pane.canvas && !!$paneSrc.get()
+      if (!inPane && !$armed.get()) return
       const play = item => (inPane ? Promise.resolve(toPane(Object.assign({ type: 'voice' }, item))) : call('playVoice', p.canvas, item))
       if (p.failed) { play({ turn: p.turn, seq: p.seq, text: p.text, failed: true }).catch(() => {}); return }
       if (!p.file) return
@@ -998,8 +1037,8 @@ export default {
       id: 'pane',
       area: 'panes',
       title: 'Vellum',
-      data: { placement: 'right', width: '560px', minWidth: '380px', maxWidth: '1100px' },
-      render: () => jsx(PaneView, { onToggle: togglePane, onFrame: onPaneFrame, onLoad: onPaneLoad })
+      data: { placement: 'right', width: '680px', minWidth: '440px', maxWidth: '1200px' },
+      render: () => jsx(PaneView, { onToggle: togglePane, onFrame: onPaneFrame, onLoad: onPaneLoad, onMarked: newMarked, onStop: stopMarked })
     })
     ctx.onDispose(() => { if ($armed.get()) stop() })
   }

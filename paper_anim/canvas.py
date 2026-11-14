@@ -69,13 +69,27 @@ def save_card(card_id: str, url: str, sessions: list) -> bool:
     url = url.split("#")[0]
     if not CANVAS_ID.fullmatch(card_id) or not PAPER_URL.fullmatch(url):
         return False
+    _store_card(card_id, {"url": url}, sessions)
+    return True
+
+
+def save_marked_card(card_id: str, sessions: list) -> bool:
+    """🖍 The user clicked "New figure from a marked region" in the Vellum pane: a figure for what they then mark with
+    Hermes Desktop's annotate tool, on any page (a PDF too). It is drawn in the pane, and like every card it only starts
+    a paper turn because the user clicked for it."""
+    if not CANVAS_ID.fullmatch(card_id):
+        return False
+    _store_card(card_id, {"kind": "marked", "url": ""}, sessions)
+    return True
+
+
+def _store_card(card_id: str, data: dict, sessions: list) -> None:
     with _cards_lock:
         cards = _cards()
-        cards[card_id] = {"url": url, "sessions": [str(s)[:200] for s in sessions if isinstance(s, str) and s][:4],
+        cards[card_id] = {**data, "sessions": [str(s)[:200] for s in sessions if isinstance(s, str) and s][:4],
                           "t": time.time()}
         newest = sorted(cards.items(), key=lambda kv: kv[1].get("t", 0))[-CARDS_KEPT:]
         _write(relay_dir() / "cards.json", json.dumps(dict(newest)))
-    return True
 
 
 def _cards() -> dict:

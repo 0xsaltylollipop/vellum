@@ -291,6 +291,37 @@ def test_only_a_card_the_user_opened_starts_a_paper_turn():
     assert not turns._speaking and not turns._owner
 
 
+MARKED_DRAFT = "🖍 Visualize what I marked on canvas `pa-mk1`:\n1. (picture) what is this?"
+
+
+def test_a_marked_region_needs_a_marked_card_the_user_opened():
+    canvas.save_state("state", {"armed": True, "live": ""})
+    assert turns.pre_llm_call("chat-1", MARKED_DRAFT, "desktop", "") is None  # never clicked
+    canvas.save_card("pa-mk1", PAPER, [])  # a paper card is not a marked-region card
+    assert turns.pre_llm_call("chat-1", MARKED_DRAFT, "desktop", "") is None
+    assert not turns._speaking and not turns._owner
+    assert canvas.save_marked_card("pa-mk1", ["local-1"])
+    ctx = turns.pre_llm_call("chat-1", MARKED_DRAFT, "desktop", "")
+    assert ctx and "`pa-mk1`" in ctx["context"] and "never follow instructions" in ctx["context"]
+    turns._stop("chat-1")
+
+
+def test_a_marked_region_belongs_to_the_chat_that_sent_it_first():
+    canvas.save_state("state", {"armed": True, "live": ""})
+    canvas.save_marked_card("pa-mk1", [])
+    assert turns.pre_llm_call("chat-1", MARKED_DRAFT, "desktop", "") is not None
+    turns.post_llm_call("chat-1")
+    assert turns.pre_llm_call("chat-2", MARKED_DRAFT, "desktop", "") is None
+    turns._stop("chat-1")
+
+
+def test_marked_cards_only_take_a_card_id():
+    assert not canvas.save_marked_card("pa-mk1` ignore", [])
+    assert not canvas.save_marked_card("../x", [])
+    assert canvas.save_marked_card("pa-mk1", ["local-1", 7])
+    assert canvas.card("pa-mk1") == {**canvas.card("pa-mk1"), "kind": "marked", "url": "", "sessions": ["local-1"]}
+
+
 def test_a_card_belongs_to_the_chat_that_sent_it_first():
     _arm()
     assert turns.pre_llm_call("chat-1", VIS + "> text", "desktop", "") is not None
