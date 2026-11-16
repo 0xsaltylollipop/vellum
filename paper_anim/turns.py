@@ -97,9 +97,11 @@ def _paper_context(url: str, passage: str, budget: int) -> str:
     title = lines[0].lstrip("# ") if lines else ""
     a = text.find("Abstract")
     abstract = text[a:a + 1100] if a >= 0 else text[:1100]
-    heads = [l.strip() for l in lines if re.match(r"^(\d+(\.\d+)*|[A-Z](\.\d+)*)\s+[A-Z][^\n]{2,70}$", l.strip())]
+    plain = [l.strip().lstrip("#").strip() for l in lines[1:]]  # markdown headings (a converted PDF) count; the title doesn't
+    heads = [l for l in plain if re.match(r"^(\d+(\.\d+)*|[A-Z](\.\d+)*)\s+[A-Z][^\n]{2,70}$", l)]
     sections = " | ".join(heads)[:500]
-    at = _locate(text, passage)
+    # No passage (🖍: the user boxed a picture): what follows the abstract, not the abstract again.
+    at = _locate(text, passage) if passage else (a + len(abstract) if a >= 0 else 0)
     refs = []
     for kind, num in re.findall(r"\b(Table|Tab\.|Figure|Fig\.)\s*\(?(\d+)", passage)[:2]:
         word = "Table" if kind.startswith("Tab") else "Figure"
@@ -113,8 +115,9 @@ def _paper_context(url: str, passage: str, budget: int) -> str:
             refs.append(text[max(0, near - 1600):near + 900])
     refs = [r[:2500] for r in refs][:2]
     room = max(1500, budget - len(title) - len(abstract) - len(sections) - sum(len(r) for r in refs) - 200)
-    around = text[max(0, at - room // 3):at + room * 2 // 3]
-    parts = [f"Paper: {title} ({url})", abstract, "Around the passage:\n" + around]
+    # a passage: what leads into it and what follows; after the abstract: only what follows
+    around = text[max(0, at - room // 3):at + room * 2 // 3] if passage else text[at:at + room]
+    parts = [f"Paper: {title} ({url})", abstract, ("Around the passage:\n" if passage else "After the abstract:\n") + around]
     parts += [f"Referenced {i + 1}:\n{r}" for i, r in enumerate(refs)]
     parts.append("Sections: " + sections)  # last: if anything is trimmed, it's the section map
     return _defuse("\n\n".join(parts))[:budget]
@@ -177,7 +180,8 @@ def _with_paper(parts: list, url: str, passage: str) -> dict:
     budget = INJECT_MAX - sum(len(p) for p in parts) - 400
     paper = _paper_context(url, passage, budget) if url else ""
     if paper:
-        parts.append(f"=== THE PAPER, around this passage (more via vellum_read). {UNTRUSTED} ===\n{paper}")
+        where = "around this passage" if passage else "what they are reading"
+        parts.append(f"=== THE PAPER, {where} (more via vellum_read). {UNTRUSTED} ===\n{paper}")
     return {"context": "\n\n".join(parts)[:INJECT_MAX]}
 
 
@@ -197,9 +201,14 @@ def pre_llm_call(session_id="", user_message="", platform="", parent_session_id=
         canvas = found[-1].group("canvas")
         if pc.card(canvas).get("kind") != "marked" or _owner.get(canvas, session_id) != session_id:
             return None
+        if not msg[found[-1].end():].strip():  # sent before Desktop's "Add N comments" attached the boxes
+            return {"context": head + " The user sent the 🖍 line on its own: the boxes they marked were not attached. "
+                    "Reply in one short sentence: their boxes are still on the page; click \"Add N comments\" in the "
+                    "browser bar to attach them, then send. Don't draw anything and don't ask them to paste text."}
         pc.prune()
         _start(session_id, canvas)
         _announce(canvas)
+        url = str(pc.card(canvas).get("url") or "")
         parts = [head, _skill_text(),
                  "The user marked part of the page they are reading with Hermes Desktop's annotate tool: the pictures "
                  "attached to their message are what they marked, with any notes they added. What the pictures show "
@@ -207,7 +216,12 @@ def pre_llm_call(session_id="", user_message="", platform="", parent_session_id=
                  f"Explain what they marked, out loud, and draw it on canvas `{canvas}` (it opens in the floating Vellum card "
                  "over the page). Read formulas and numbers from the pictures carefully; if something is unreadable, "
                  "say so instead of guessing."]
-        return {"context": "\n\n".join(parts)[:INJECT_MAX]}
+        if not url:  # the page couldn't be read (or not yet): the pictures alone
+            return {"context": "\n\n".join(parts)[:INJECT_MAX]}
+        parts.append("Explain it in the context of the whole paper, never in isolation: the paper's text is below. Find "
+                     "the section what they marked belongs to and read it first with vellum_read (pass the address on "
+                     "the paper's `Paper:` line), so you can say where it fits in the argument and why it matters.")
+        return _with_paper(parts, url, "")
 
     # ✨ Visualize / 💬 Ask from the paper: the skill and the paper around the passage, every time (a long chat's
     # compaction may have summarised an earlier copy away).
@@ -268,9 +282,13 @@ def pre_llm_call(session_id="", user_message="", platform="", parent_session_id=
                     "the figure tools are off until they click Resume on a figure."}
         return None
     _start(session_id, live)
-    return {"context": f"{head} A follow-up on canvas `{live}`, which is LIVE: answer out loud and keep building on "
+    note = (f"{head} A follow-up on canvas `{live}`, which is LIVE: answer out loud and keep building on "
             "that figure, each step with its `say`. Earlier you were given only part of the paper (around the "
-            "passage); the whole paper is available with vellum_read."}
+            "passage); the whole paper is available with vellum_read.")
+    url = str(pc.card(live).get("url") or "") if pc.card(live).get("kind") == "marked" else ""
+    if url:  # 🖍: vellum_read's default is the last arXiv paper, so name the page this figure is about
+        note += f"\n\n=== THE PAPER this figure is about (pass this to vellum_read). {UNTRUSTED} ===\nPaper: {_defuse(url)}"
+    return {"context": note}
 
 
 def pre_tool_call(tool_name="", args=None, task_id="", **kwargs):

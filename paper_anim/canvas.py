@@ -14,6 +14,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from urllib.parse import quote
 
 from .config import data_dir
 
@@ -22,6 +23,14 @@ PLUGIN_ID = "vellum"
 # Papers the plugin works with: arXiv's own HTML, and ar5iv (arXiv's HTML for older papers); both are LaTeXML pages.
 PAPER_URL = re.compile(r"https://(?:arxiv\.org|ar5iv\.labs\.arxiv\.org|ar5iv\.org)/html/[^)\s#`]{1,160}")
 CANVAS_ID = re.compile(r"pa-[a-z0-9]{1,30}")  # a figure card's id, as desktop/plugin.js makes them
+# 🖍 Any web page the user marks on (a PDF, a blog): its text and address are untrusted and reach the model only
+# inside the labelled paper block. Printable ASCII without spaces, quotes, brackets or backticks: anything else in an
+# address is percent-encoded first (PAGE_URL_SAFE), so it can't reshape the notes it is quoted in.
+PAGE_URL_SAFE = "!#$%&*+,-./:;=?@^_|~"
+PAGE_URL = re.compile(r"https?://[A-Za-z0-9!#$%&*+,\-./:;=?@^_|~]{1,1990}")
+PAGE_TEXT_MAX = 600_000
+# Hermes's converter prepends a note for the model reading a file (scanned pages, how to OCR them): not page text.
+EXTRACT_NOTE = re.compile(r"\A\[(?:EXTRACTION COVERAGE WARNING|NEEDS OCR):.*?\.\]\n", re.S)
 ERROR_MAX = 600  # characters of a figure's error message passed on to the model
 
 
@@ -122,10 +131,49 @@ def paper_key(url: str) -> str:
     return hashlib.sha1(url.split("#")[0].encode()).hexdigest()[:16]
 
 
-def save_paper(url: str, title: str, text: str) -> None:
+def save_paper(url: str, title: str, text: str, latest: bool = True) -> None:
     key = paper_key(url)
     _write(relay_dir() / "papers" / f"{key}.txt", f"# {title}\n{url}\n\n{text}")
-    _write(relay_dir() / "papers" / "latest.json", json.dumps({"url": url, "title": title, "key": key}))
+    if latest:  # what vellum_read opens when the model names no paper
+        _write(relay_dir() / "papers" / "latest.json", json.dumps({"url": url, "title": title, "key": key}))
+
+
+def pdf_text(data: bytes) -> str:
+    """🖍 A PDF the user is marking on, as text (markdown, tables included), through Hermes's own document converter:
+    the one read_file uses, with its size and safety limits. Empty when it can't (scanned, encrypted, no converter)."""
+    try:
+        from tools.read_extract import extract_document_bytes
+    except ImportError:
+        return ""
+    try:
+        return EXTRACT_NOTE.sub("", extract_document_bytes(data, "page.pdf"))
+    except Exception as e:  # ExtractionError: unreadable, scanned, too large or no converter installed
+        log.debug("vellum: could not read the PDF: %s", e)
+        return ""
+
+
+def save_marked_page(card_id: str, url: str, title: str, text: str) -> bool:
+    """🖍 The page the user started marking on (read when they clicked Mark): its text, kept like a paper's and tied to
+    their marked card, so the figure is explained in the context of the whole paper. Only for a marked card the user
+    opened; the latest paper for vellum_read stays the arXiv one."""
+    url = quote(url.split("#")[0], safe=PAGE_URL_SAFE)
+    text = text[:PAGE_TEXT_MAX]
+    if not PAGE_URL.fullmatch(url) or not text.strip():
+        return False
+    if not title:  # a PDF tab has no title: its first heading (the converter's "# Title"), else its first line
+        first = re.search(r"(?m)^# (.+)$", text) or re.search(r"(?m)^\s*(\S.*)$", text)
+        title = " ".join(first.group(1).split())[:200] if first else ""
+    with _cards_lock:
+        cards = _cards()
+        c = cards.get(card_id)
+        if not isinstance(c, dict) or c.get("kind") != "marked":
+            return False
+        # An arXiv paper Vellum already read from the paper itself stays as it is: a page can't rewrite it.
+        if not (PAPER_URL.fullmatch(url) and (relay_dir() / "papers" / f"{paper_key(url)}.txt").exists()):
+            save_paper(url, title, text, latest=False)
+        cards[card_id] = {**c, "url": url}
+        _write(relay_dir() / "cards.json", json.dumps(cards))
+    return True
 
 
 STATE_FRESH_S = 75  # Desktop re-confirms "on" about every 20 s; older than this (Desktop closed or crashed) is off
@@ -279,10 +327,11 @@ def vellum_clear(args: dict, **kwargs) -> str:
 def vellum_read(args: dict, **kwargs) -> str:
     papers = relay_dir() / "papers"
     try:
-        latest = json.loads((papers / "latest.json").read_text())
         url = str(args.get("url") or "").split("#")[0].strip()
         if url:  # a specific paper (the one named in the user's message); else the one open most recently
             latest = {"url": url, "key": paper_key(url), "title": ""}
+        else:
+            latest = json.loads((papers / "latest.json").read_text())
         text = (papers / f"{latest['key']}.txt").read_text()
         latest["title"] = latest["title"] or text.split("\n", 1)[0].lstrip("# ")
     except Exception as e:

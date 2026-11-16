@@ -4,6 +4,7 @@ the agent half (Hermes's canvas tools and hooks) reads what it stores.
 GET  /runtime              the sandboxed figure runtime page (HTML) the card loads into its iframe
 POST /canvas/result        the paper's answer to a canvas tool request (draw / look / clear), relayed to the tool
 POST /paper                the open paper's full text, for vellum_read and the hidden context
+POST /page                 🖍 the page the user is marking on (its text, or a PDF to convert), for their marked card
 POST /card                 a figure card the user opened with ✨ Visualize, 💬 Ask or 🖍 (a marked region drawn in the pane;
                            only these start paper turns)
 POST /state                whether Vellum is on, and which card is LIVE (read by the hooks)
@@ -11,6 +12,8 @@ POST /selection            the passage behind a 💬 Ask                        
 GET  /voice/{file}         one voiced sentence of Hermes's (data URL) for the card to play
 """
 import asyncio
+import base64
+import binascii
 import importlib
 import importlib.util
 import sys
@@ -62,6 +65,30 @@ async def paper(body: dict):
         raise HTTPException(400, "Only arXiv HTML papers (arxiv.org/html or ar5iv).")
     title = " ".join(str(body.get("title") or "").split())[:300]
     await asyncio.to_thread(canvas.save_paper, url, title, str(body.get("text") or "")[:600000])
+    return {"ok": True}
+
+
+PDF_B64_MAX = 28 * 1024 * 1024  # a 20 MB PDF, base64-encoded
+
+
+@router.post("/page")
+async def page(body: dict):
+    card_id = str(body.get("card") or "")
+    url = str(body.get("url") or "")[:2000]
+    title = " ".join(str(body.get("title") or "").split())[:300]
+    pdf = body.get("pdf")
+    if isinstance(pdf, str) and pdf:
+        if len(pdf) > PDF_B64_MAX:
+            raise HTTPException(413, "PDF too large")
+        try:
+            data = base64.b64decode(pdf, validate=True)
+        except (binascii.Error, ValueError):
+            raise HTTPException(400, "not a PDF")
+        text = await asyncio.to_thread(canvas.pdf_text, data)
+    else:
+        text = str(body.get("text") or "")
+    if not await asyncio.to_thread(canvas.save_marked_page, card_id, url, title, text):
+        raise HTTPException(400, "not a marked card, or nothing readable on the page")
     return {"ok": True}
 
 

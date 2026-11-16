@@ -61,18 +61,19 @@ Why a plugin and not a prompt: drawing inside the page needs the Desktop half, k
 ## Security
 
 - **Figure code** is written by your model and runs only in a sandboxed iframe (`sandbox="allow-scripts"`, opaque origin, CSP `default-src 'none'` with the page's scripts pinned by hash). It can't reach the paper page, your session or your files, and it can't make requests through the browser's normal routes (fetch, images, scripts, frames). Two routes the sandbox and CSP don't govern are handled best effort: WebRTC (its constructors are removed) and a figure navigating its own frame, which nothing in CSP prevents: that one request leaves before the card removes the figure. A model talked into leaking data could still try, but it would have Hermes's own web tools for that anyway, so the sandbox adds no new reach.
-- **Paper text is untrusted.** The passage and the text around it are labelled for the model as web content whose instructions must not be followed.
+- **Paper text is untrusted.** The passage, the text around it, and (for 🖍) the marked page's text, title and address are labelled for the model as web content whose instructions must not be followed. Page addresses are percent-encoded to plain ASCII, and a marked page can't overwrite an arXiv paper Vellum already read.
 - **You send every message.** Clicks only create a draft. Page events are checked, and a figure card is registered with the backend before its draft exists, so a lookalike message typed by hand does nothing special.
 - **Other chats are left alone.** Cron, messaging platforms and subagents never get paper turns, and a figure belongs to the chat that sends its draft first.
 
 ## What it touches
 
-- **Pages:** arXiv HTML pages only (arxiv.org/html and ar5iv), with Desktop's per-site consent. It adds the buttons, the figure card, a style sheet and its in-page script; the paper's text is not changed. When you switch Vellum on, it saves the whole paper's text for Hermes (see Stored data).
-- **Your model:** the passage and nearby paper text go to whatever model Hermes uses.
+- **Pages:** ✨ on arXiv HTML pages only (arxiv.org/html and ar5iv), with Desktop's per-site consent. It adds the buttons, the figure card, a style sheet and its in-page script; the paper's text is not changed. When you switch Vellum on, it saves the whole paper's text for Hermes (see Stored data).
+- **🖍 Mark:** when you click it, a read-only script reads the page open in the Browser (any site, after Desktop's per-site consent): an arXiv paper's HTML version from arxiv.org, another PDF's file from its own site (with that site's cookies, as the tab has them), or the page's text. PDFs are converted by Hermes's own document converter (`read_file`'s), on your machine.
+- **Your model:** the passage and nearby paper text go to whatever model Hermes uses; for 🖍, the pictures you boxed and the marked page's title, abstract, section map and text after the abstract (which may be a page you are signed in to).
 - **Voice:** Hermes's own `text_to_speech` with your configured provider (Edge TTS by default), one call per spoken sentence, at most 60 per turn.
-- **Stored data** in `<HERMES_HOME>/plugin-data/vellum/`: the text of the 20 most recent papers, the 50 most recent figure card ids, the current Ask, the on/LIVE state, voice clips (about a day) and tool answers (about an hour).
+- **Stored data** in `<HERMES_HOME>/plugin-data/vellum/`: the text of the 20 most recent papers and marked pages, the 50 most recent figure card ids, the current Ask, the on/LIVE state, voice clips (about a day) and tool answers (about an hour).
 - **Plumbing:** backend routes under `/api/plugins/vellum/` and plugin events `plugin.vellum.*`. The figure frame's CSP allows `'unsafe-eval'` because each drawing step is model-written JavaScript run inside the sandbox.
-- No telemetry, no credentials, no external CLIs, no downloads, no compiled binaries.
+- No telemetry, no credentials, no external CLIs, no compiled binaries. The only downloads are the pages above, fetched when you click 🖍 Mark (up to 20 MB for a PDF).
 
 ## Repository layout
 

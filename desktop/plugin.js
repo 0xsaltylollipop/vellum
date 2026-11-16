@@ -406,18 +406,11 @@ function vellumInPage(secret) {
     return canvasCall(id, function () { var req = 'clr' + Math.random().toString(16).slice(2); return { key: req, msg: { type: 'clear', req: req } } }, 8000)
   }
 
-  // The whole paper as text (formulas as LaTeX), for Hermes's vellum_read tool.
+  // The whole paper as text (formulas as LaTeX), for Hermes's vellum_read tool. pageText is defined beside this
+  // script when it is installed (installCode), so 🖍's page reader shares the same extractor.
   function paperText() {
-    var root = (document.querySelector('.ltx_page_main') || document.querySelector('article') || document.body).cloneNode(true)
-    root.querySelectorAll('.pa-card, script, style, nav, .ltx_page_footer, .ltx_bibliography').forEach(function (e) { e.remove() })
-    root.querySelectorAll('h1, h2, h3, h4, h5, h6, .ltx_para, li, .ltx_caption, tr').forEach(function (e) { e.appendChild(document.createTextNode('\n\n')) })
-    root.querySelectorAll('math').forEach(function (m) {
-      var tex = m.getAttribute('alttext') || ''
-      m.replaceWith(document.createTextNode(m.getAttribute('display') === 'block' ? ' $$' + tex + '$$ ' : ' $' + tex + '$ '))
-    })
-    var docTitle = document.querySelector('.ltx_title_document')
-    var text = root.textContent.replace(/[ \t]+/g, ' ').replace(/\n\s*\n\s*(\n\s*)+/g, '\n\n').trim()
-    return { url: location.href.split('#')[0], title: docTitle ? clean(docTitle.textContent) : document.title, text: text }
+    var t = pageText(document)
+    return { url: location.href.split('#')[0], title: t.title, text: t.text }
   }
 
   function openFigure(id) {
@@ -575,8 +568,59 @@ const random = n => {
   return Array.from(a, x => x.toString(36)).join('')
 }
 const newKey = () => ({ name: '__vellum_' + random(2), secret: random(6) })
+
+// A page as text, formulas as LaTeX: an arXiv HTML paper (its main column, without the bibliography), or any other
+// page (its article or main part, without navigation and chrome). Serialized into pages, so it is self-contained.
+function pageText(doc) {
+  var paper = doc.querySelector('.ltx_page_main')
+  var root = (paper || doc.querySelector('article') || doc.querySelector('main') || doc.body || doc.documentElement).cloneNode(true)
+  root.querySelectorAll('.pa-card, script, style, nav, .ltx_page_footer, .ltx_bibliography' +
+    (paper ? '' : ', noscript, header, footer, aside, form, svg')).forEach(function (e) { e.remove() })
+  root.querySelectorAll('h1, h2, h3, h4, h5, h6, .ltx_para, li, .ltx_caption, tr' + (paper ? '' : ', p, pre, blockquote'))
+    .forEach(function (e) { e.appendChild(doc.createTextNode('\n\n')) })
+  root.querySelectorAll('math').forEach(function (m) {
+    var tex = m.getAttribute('alttext') || ''
+    m.replaceWith(doc.createTextNode(m.getAttribute('display') === 'block' ? ' $$' + tex + '$$ ' : ' $' + tex + '$ '))
+  })
+  var heading = doc.querySelector('.ltx_title_document')
+  var title = (heading ? heading.textContent : doc.title || '').replace(/\s+/g, ' ').trim()
+  var text = (root.textContent || '').replace(/[ \t]+/g, ' ').replace(/\n\s*\n\s*(\n\s*)+/g, '\n\n').trim()
+  return { title: title, text: text.slice(0, 600000) }
+}
+
+// 🖍 What Vellum reads when the user starts marking a page, so Hermes explains their boxes with the whole paper
+// around them. Runs in the page (any site), so it is self-contained and only returns data:
+//   arXiv (abs, pdf or html): the paper's HTML version, fetched from the same site: it keeps tables and math as text.
+//   Another PDF: its bytes, fetched from the same site; the backend converts them with Hermes's document converter.
+//   Any other page: its text.
+async function readPage(pageText, maxPdf) {
+  var url = location.href.split('#')[0]
+  var arxiv = /^(www\.)?arxiv\.org$/.test(location.hostname) && /^\/(abs|pdf|html)\/(.+?)(\.pdf)?\/?$/.exec(location.pathname)
+  if (arxiv && arxiv[1] !== 'html') {
+    try {
+      var r = await fetch('/html/' + arxiv[2], { credentials: 'omit' })
+      var doc = r.ok ? new DOMParser().parseFromString(await r.text(), 'text/html') : null
+      if (doc && doc.querySelector('.ltx_page_main')) {
+        var html = pageText(doc)
+        if (html.text.length > 2000) return { url: r.url.split('#')[0], title: html.title, text: html.text }
+      }
+    } catch (e) { /* no HTML version: read what is open */ }
+  }
+  if (document.contentType === 'application/pdf') {  // Chromium's own PDF tab (a page that embeds a PDF is a page)
+    var res = await fetch(url)
+    if (!res.ok || Number(res.headers.get('content-length') || 0) > maxPdf) return null
+    var buf = await res.arrayBuffer()
+    if (buf.byteLength > maxPdf) return null
+    var bytes = new Uint8Array(buf), bin = ''
+    for (var i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000))
+    return { url: url, title: '', pdf: btoa(bin) }  // a PDF tab's title is its file name: the backend takes the paper's
+  }
+  var page = pageText(document)
+  return { url: url, title: page.title, text: page.text }
+}
+
 const installCode = key =>
-  '(function(){var api=(' + vellumInPage.toString() + ')(' + JSON.stringify(key.secret) + ');' +
+  '(function(){var pageText=(' + pageText.toString() + ');var api=(' + vellumInPage.toString() + ')(' + JSON.stringify(key.secret) + ');' +
   'var res=api.call(' + JSON.stringify(key.secret) + ',"install",[]);' +
   'if(res&&res.ok)Object.defineProperty(window,' + JSON.stringify(key.name) + ',{value:api,writable:false,configurable:false,enumerable:false});' +
   'return res;})()'
@@ -607,6 +651,7 @@ function Chip({ toggle }) {
 const CARD_SIZE = { width: 560, height: 500 } // the 16:9 figure plus its caption and a toolbar
 const $paneMode = atom(false)   // the card is open: ✨ Visualize / 💬 Ask figures draw there instead of in the paper
 const $paneMarked = atom(false) // the open figure is for a region marked with Desktop's annotate tool (🖍)
+const $paneDocked = atom(false) // the card is docked beside the chat (resizable) instead of floating
 const $paneFigure = atom({ key: 0, src: '', height: 560, status: '' }) // what the card shows
 
 const toDataUrl = html => {
@@ -621,6 +666,7 @@ const toDataUrl = html => {
 // everything it reports is rebuilt from known fields.
 function createPaneFigure(ctx, loadRuntime) {
   let canvas = '', frame = null, ready = false, outbox = [], waits = {}, pieces = 0, loads = 0
+  let drawn = [] // this figure's drawing steps, replayed when the card moves (docked <-> floating) into a new frame
   const show = patch => $paneFigure.set({ ...$paneFigure.get(), ...patch })
   const fail = error => {
     Object.keys(waits).forEach(k => { const w = waits[k]; delete waits[k]; w.done({ ok: false, error }) })
@@ -673,20 +719,28 @@ function createPaneFigure(ctx, loadRuntime) {
     status: text => show({ status: text }),
     async open(id) {
       fail('A new figure was opened.')
-      canvas = id; frame = null; ready = false; outbox = []; waits = {}; pieces = 0; loads = 0
+      canvas = id; frame = null; ready = false; outbox = []; waits = {}; pieces = 0; loads = 0; drawn = []
       const html = await loadRuntime()
       show({ key: $paneFigure.get().key + 1, src: toDataUrl(html), height: 560, status: 'Ready: press Enter in your Hermes chat' })
     },
     stop: reason => fail(reason),
-    close() { fail('The Vellum card was closed.'); canvas = ''; show({ src: '', status: '' }) },
+    close() { fail('The Vellum card was closed.'); canvas = ''; drawn = []; show({ src: '', status: '' }) },
+    // The card is about to mount in a new frame (docked <-> floating): the new frame loads the runtime afresh, so its
+    // steps are queued to run again, in order, once it is ready. A step still waiting for its answer gets it from there.
+    remount() {
+      frame = null; ready = false; loads = 0
+      outbox = drawn.map(piece => ({ type: 'pieces', pieces: [piece] }))
+    },
     runStep(code, after) {
       show({ status: 'Hermes is drawing…' })
       const n = pieces++
-      return ask('n' + n, { type: 'pieces', pieces: [{ n, code: String(code), after: after || null }] }, 25000)
+      const piece = { n, code: String(code), after: after || null }
+      drawn.push(piece)
+      return ask('n' + n, { type: 'pieces', pieces: [piece] }, 25000)
         .then(r => { show({ status: '' }); return r })
     },
     look() { const req = reqId('look'); return ask(req, { type: 'look', req }, 15000) },
-    clear() { const req = reqId('clr'); return ask(req, { type: 'clear', req }, 8000) },
+    clear() { const req = reqId('clr'); drawn = []; return ask(req, { type: 'clear', req }, 8000) },
     voice(item) { send({ type: 'voice', ...item }) },
     frameRef: el => { frame = el || null },
     // The runtime loads exactly once; any later load is the figure navigating itself, so stop it.
@@ -732,7 +786,9 @@ const CARD_CSS = [
   '.vl-btn.quiet{color:#CFE0E3;background:linear-gradient(180deg,#1C1E40,#101126);border-color:rgba(90,150,160,.42);text-shadow:0 0 6px rgba(90,180,190,.35);animation:none}',
   '.vl-close{flex:none;border:none;background:none;color:#A9ABD6;font:14px/1 ' + LABEL_FONT + ';cursor:pointer;padding:2px 4px}',
   '.vl-close:hover{color:#F2F2F2}',
-  '.vl-body{flex:1;overflow:auto;border-radius:2px}',
+  '.vl-dock{flex:none;border:none;background:none;color:#A9ABD6;font:15px/1 ' + LABEL_FONT + ';cursor:pointer;padding:2px 4px}',
+  '.vl-dock:hover{color:#F2F2F2}',
+  '.vl-body{flex:1;overflow:auto;scrollbar-gutter:stable both-edges;border-radius:2px}',  // the figure stays centred
   '.vl-empty{color:#A9ABD6;font-size:12.5px;line-height:1.65;padding:14px 4px}',
   '.vl-empty b{color:#F2F2F2;font-weight:600}',
   '@keyframes vl-pulse{0%,100%{opacity:.25}50%{opacity:1}}',
@@ -740,9 +796,10 @@ const CARD_CSS = [
   '@media (prefers-reduced-motion: reduce){.vl-dot,.vl-btn{animation:none}}'
 ].join('')
 
-function PaneView({ figure, onMarked, onStop, onClose }) {
+function PaneView({ figure, onMarked, onStop, onClose, onDock }) {
   const { key, src, height, status } = useValue($paneFigure)
   const marked = useValue($paneMarked)
+  const docked = useValue($paneDocked)
   const busy = /…$/.test(status)
   const head = jsxs('div', {
     className: 'vl-head',
@@ -758,6 +815,10 @@ function PaneView({ figure, onMarked, onStop, onClose }) {
         title: 'Start a figure, then box one or more areas of any page or PDF with the annotate tool and send'
       }),
       marked ? jsx('button', { type: 'button', className: 'vl-btn quiet', onClick: onStop, title: 'Stop drawing here: Hermes chats normally again', children: 'Stop' }) : null,
+      jsx('button', {
+        type: 'button', className: 'vl-dock', onClick: onDock, children: docked ? '⇱' : '⇥',
+        title: docked ? 'Float the card over the page' : 'Dock beside the chat (drag its edge to resize)'
+      }),
       jsx('button', { type: 'button', className: 'vl-close', onClick: onClose, title: 'Close the Vellum card', children: '✕' })
     ]
   })
@@ -807,17 +868,35 @@ export default {
     const figure = createPaneFigure(ctx, async () => runtime || (runtime = (await ctx.rest('/runtime', { timeoutMs: 30000 })).html))
     // The card is a floating pane that exists only while it is open: closing it ends its figure.
     let closeCard = null
+    // Floating: a fixed-size card over the page, dragged by its header. Docked: a pane beside the chat whose edge
+    // drags to resize. Separate ids, so Desktop keeps each one's own position and width.
+    const mountCard = () => {
+      const docked = $paneDocked.get()
+      closeCard = ctx.register({
+        id: docked ? 'pane' : 'card',
+        area: 'panes',
+        title: 'Vellum',
+        data: docked
+          ? { placement: 'right', width: '560px', minWidth: '380px', maxWidth: '1100px', lifecycleKeepAlive: true }
+          : { placement: 'floating', anchor: 'bottom-right', ...CARD_SIZE, lifecycleKeepAlive: true },
+        render: () => jsx(PaneView, { figure, onMarked: newMarked, onStop: stopMarked, onClose: () => setCard(false), onDock: toggleDock })
+      })
+      // a docked pane can join its zone as a background tab: bring it forward
+      if (docked) { try { if (typeof host.revealPane === 'function') host.revealPane('vellum:pane') } catch (err) { /* older Desktop */ } }
+    }
+    const toggleDock = () => {
+      $paneDocked.set(!$paneDocked.get())
+      ctx.storage.set('paneDocked', $paneDocked.get())
+      if (!closeCard) return
+      closeCard()
+      figure.remount() // the figure carries over: its steps run again in the new frame
+      mountCard()
+    }
     const setCard = on => {
       $paneMode.set(on)
       ctx.storage.set('paneMode', on)
       if (on && !closeCard) {
-        closeCard = ctx.register({
-          id: 'card',
-          area: 'panes',
-          title: 'Vellum',
-          data: { placement: 'floating', anchor: 'bottom-right', ...CARD_SIZE, lifecycleKeepAlive: true },
-          render: () => jsx(PaneView, { figure, onMarked: newMarked, onStop: stopMarked, onClose: () => setCard(false) })
-        })
+        mountCard()
       } else if (!on && closeCard) {
         closeCard()
         closeCard = null
@@ -833,7 +912,8 @@ export default {
     }
     // 🖍 A figure for a marked region: registered (only registered cards start paper turns), opened in the card, and a
     // one-line draft put in the chat box. The user then marks part of the page or PDF with Desktop's annotate tool,
-    // which adds the pictures to the same message, and sends it. Nothing runs in the page itself.
+    // which adds the pictures to the same message, and sends it. Meanwhile readPage reads the page's text (only data
+    // comes back), so the turn can explain the boxes in the context of the whole paper.
     const newMarked = async () => {
       const cardId = 'pa-' + random(2)
       try {
@@ -848,7 +928,37 @@ export default {
       liveCard = cardId // follow-ups in this chat keep drawing here until the card's Stop
       postState()
       const ok = await toDraft('🖍 Visualize what I marked on canvas `' + cardId + '`:\n', { focus: false })
-      figure.status(ok ? 'Box one or more areas with the annotate tool, then send' : 'Open a Hermes chat first')
+      if (!ok) { figure.status('Open a Hermes chat first'); return }
+      figure.status('Reading the page…')
+      const read = await readMarkedPage(cardId)
+      // Only while nothing has moved on (the user already sent, or pressed Stop): never overwrite a newer status.
+      if (figure.canvas() === cardId && $paneFigure.get().status === 'Reading the page…') {
+        figure.status((read ? 'Paper read. ' : '') + 'Box areas with Annotate, click Add N comments, then send')
+      }
+    }
+
+    // 🖍 The page the user is about to mark, read now (not when they send), so the turn starts with the paper around
+    // their boxes and no wait. Best effort: without it Hermes still has the pictures.
+    const PAGE_PDF_MAX = 20 * 1024 * 1024
+    const PAGE_TEXT_MAX = 600000
+    async function readMarkedPage(cardId) {
+      const code = '(' + readPage.toString() + ')(' + pageText.toString() + ',' + PAGE_PDF_MAX + ')'
+      const timeout = new Promise(resolve => ctx.setTimeout(() => resolve(null), 30000))
+      const p = await Promise.race([page(code), timeout]).catch(() => null)
+      if (!p || typeof p !== 'object') return false
+      // What the page returned is checked here too: a page can override the builtins its own reader used.
+      const body = { card: cardId, url: String(p.url || '').slice(0, 2000), title: String(p.title || '').slice(0, 300) }
+      if (typeof p.pdf === 'string' && p.pdf) {
+        if (p.pdf.length > Math.ceil(PAGE_PDF_MAX * 4 / 3) + 4) return false
+        body.pdf = p.pdf
+      } else if (typeof p.text === 'string' && p.text) body.text = p.text.slice(0, PAGE_TEXT_MAX)
+      else return false
+      try {
+        await ctx.rest('/page', { method: 'POST', body, timeoutMs: 60000 })
+        return true
+      } catch (err) {
+        return false
+      }
     }
     const stopMarked = () => {
       figure.stop('Stopped.')
@@ -1085,6 +1195,7 @@ export default {
       order: 126,
       render: () => jsx(PaneChip, { toggle: () => setCard(!$paneMode.get()) })
     })
+    $paneDocked.set(!!ctx.storage.get('paneDocked', false))
     setCard(!!ctx.storage.get('paneMode', false))
     ctx.onDispose(() => { if ($armed.get()) stop() })
   }
